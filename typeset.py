@@ -171,6 +171,7 @@ def normalize_newlines(text):
     """
     Collapses multiple empty lines and trims trailing spaces.
     """
+    text = text.replace('\u2028', '\n').replace('\u2029', '\n')
     lines = [line.rstrip() for line in text.splitlines()]
     
     new_lines = []
@@ -1169,13 +1170,88 @@ def is_plain_section_heading(lines, index):
         return False
     if len(s) > 36:
         return False
-    if re.search(r'[。！？!?；;]$', s):
+    if re.search(r'https?://|www\.|@', s, re.I):
+        return False
+    if re.search(r'[。！!；;]$', s):
         return False
     previous_blank = index == 0 or not lines[index - 1].strip()
-    if not previous_blank:
-        return False
+    next_has_content = any(line.strip() for line in lines[index + 1:index + 3])
     # Avoid promoting labels that are just numbers or punctuation fragments.
+    if not re.search(r'[\u4e00-\u9fa5A-Za-z]', s):
+        return False
+    if previous_blank:
+        return True
+
+    # RTF/textutil often loses visual blank lines. Promote short title-like
+    # lines after a completed paragraph, but avoid list labels after a colon.
+    previous_text = lines[index - 1].strip()
+    if not next_has_content:
+        return False
+    if previous_text.endswith(('：', ':')):
+        return False
+    if not re.search(r'[。！？!?]$', previous_text):
+        return False
+    if re.search(r'[，,：:]', s):
+        return False
+    if not (s.endswith(('？', '?')) or re.match(r'^(先看|为什么|怎么|如何|它具体|具体|结论|总结|写在最后|最后)', s)):
+        return False
+    return len(s) <= 24
+
+def is_plain_list_label(text):
+    """Return True for short option labels in plain text."""
+    s = text.strip()
+    if not s:
+        return False
+    if has_markdown_structure(s):
+        return False
+    if len(s) > 30:
+        return False
+    if re.search(r'https?://|www\.|@', s, re.I):
+        return False
+    if re.search(r'[。！？!?；;：:]$', s):
+        return False
     return bool(re.search(r'[\u4e00-\u9fa5A-Za-z]', s))
+
+def collect_plain_list_after_colon(lines, start_index):
+    """Collect simple labels or label-description pairs after a colon line."""
+    first_label = lines[start_index].strip() if start_index < len(lines) else ''
+    second_line = lines[start_index + 1].strip() if start_index + 1 < len(lines) else ''
+    if is_plain_list_label(first_label) and is_plain_list_label(second_line):
+        items = []
+        index = start_index
+        while index < len(lines):
+            label = lines[index].strip()
+            if not is_plain_list_label(label):
+                break
+            items.append(label)
+            index += 1
+        if len(items) < 2:
+            return None, start_index
+        return items, index
+
+    items = []
+    index = start_index
+
+    while index < len(lines):
+        label = lines[index].strip()
+        if not label:
+            break
+        if not is_plain_list_label(label):
+            break
+
+        next_index = index + 1
+        next_line = lines[next_index].strip() if next_index < len(lines) else ''
+        if next_line and not is_plain_list_label(next_line) and not is_plain_section_heading(lines, next_index):
+            items.append(f'{label}：{next_line}')
+            index += 2
+            continue
+
+        items.append(label)
+        index += 1
+
+    if len(items) < 2:
+        return None, start_index
+    return items, index
 
 def split_inline_list_items(items_text):
     """Split a short Chinese inline enumeration into bullet items."""
@@ -1269,19 +1345,39 @@ def auto_structure_plain_text(text):
         return text
 
     out = []
-    for i, line in enumerate(lines):
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         s = line.strip()
         if i == first_content_index and s:
             out.append(f'# {s}')
             out.append('')
+            i += 1
             continue
+
+        if s.endswith(('：', ':')):
+            converted_intro = convert_inline_list_to_markdown_lines(line)
+            out.extend(converted_intro)
+            items, next_index = collect_plain_list_after_colon(lines, i + 1)
+            if items:
+                if out and out[-1] != '':
+                    out.append('')
+                out.extend(f'{item_index}. {item}' for item_index, item in enumerate(items, 1))
+                out.append('')
+                i = next_index
+                continue
+            i += 1
+            continue
+
         if i != first_content_index and is_plain_section_heading(lines, i):
             if out and out[-1] != '':
                 out.append('')
             out.append(f'## {s}')
             out.append('')
+            i += 1
             continue
         out.extend(convert_inline_list_to_markdown_lines(line))
+        i += 1
 
     return normalize_newlines('\n'.join(out))
 
