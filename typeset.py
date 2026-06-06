@@ -310,6 +310,17 @@ def _first_inline_index(tokens, start_index, end_index):
             return index
     return None
 
+def _is_inside_open_token(tokens, index, token_type):
+    depth = 0
+    for current in reversed(tokens[:index]):
+        if current.type == token_type.replace('_open', '_close'):
+            depth += 1
+        elif current.type == token_type:
+            if depth == 0:
+                return True
+            depth -= 1
+    return False
+
 def _first_text_child(inline_token):
     if not inline_token.children:
         return None
@@ -336,6 +347,22 @@ def _make_mark_token(token_type, nesting, base_token):
     token.markup = '=='
     token.level = base_token.level
     return token
+
+def _make_strong_token(token_type, nesting, base_token):
+    token = Token(token_type, 'strong', nesting)
+    token.markup = '**'
+    token.level = base_token.level
+    return token
+
+def _wrap_inline_children_in_strong(inline_token):
+    if not inline_token.children:
+        return
+    inline_token.children = [
+        _make_strong_token('strong_open', 1, inline_token),
+        *inline_token.children,
+        _make_strong_token('strong_close', -1, inline_token),
+    ]
+    _refresh_inline_content(inline_token)
 
 def _transform_text_child(child):
     """Normalize a text token and split ==highlight== into mark tokens."""
@@ -998,15 +1025,13 @@ def split_blocks(md_text):
         blocks.append(('para', '\n'.join(buf)))
     return blocks
 
-PORTABLE_CALLOUT_LABELS = {
-    'summary': '摘要',
-    'key': '核心观点',
-    'note': '备注',
-    'quote': '引用',
-}
-
 PLATFORM_ALIASES = {
     'zhihu': 'zhihu',
+    'zhihu-html': 'zhihu-html',
+    'zhihu_html': 'zhihu-html',
+    'zhihu-rich': 'zhihu-html',
+    'zhihu_rich': 'zhihu-html',
+    'zhihuhtml': 'zhihu-html',
     'xhs': 'xhs',
     'xiaohongshu': 'xhs',
     'rednote': 'xhs',
@@ -1038,7 +1063,7 @@ def markdown_to_portable_markdown(md_text):
     Convert structured Markdown into portable GFM.
 
     Standard Markdown/GFM structures are preserved. Article Typesetter private
-    markers are downgraded: typed callouts become labeled blockquotes, and
+    markers are downgraded: typed callouts become ordinary blockquotes, and
     ==highlight== becomes bold text.
     """
     return render_portable_markdown(parse_markdown_tokens(md_text))
@@ -1062,9 +1087,9 @@ def chinese_ordinal(number):
 def text_inline_to_platform(text):
     """Convert Markdown inline emphasis into visible plain-text markers."""
     text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'\1（\2）', text)
-    text = re.sub(r'==([^=]+)==', r'【\1】', text)
-    text = re.sub(r'\*\*([^*]+)\*\*', r'【\1】', text)
-    text = re.sub(r'__([^_]+)__', r'【\1】', text)
+    text = re.sub(r'==([^=]+)==', r'「\1」', text)
+    text = re.sub(r'\*\*([^*]+)\*\*', r'「\1」', text)
+    text = re.sub(r'__([^_]+)__', r'「\1」', text)
     text = re.sub(r'`([^`]+)`', r'\1', text)
     text = text.replace('\\*', '*').replace('\\_', '_')
     return text.strip()
@@ -1074,7 +1099,7 @@ def render_platform_heading(level, text, platform, counters):
     if level == 1:
         counters['h2'] = 0
         counters['h3'] = 0
-        return text
+        return f'《{text}》'
     if level == 2:
         counters['h2'] += 1
         counters['h3'] = 0
@@ -1089,13 +1114,8 @@ def render_platform_heading(level, text, platform, counters):
     return text
 
 def render_platform_callout(callout_type, content, platform):
-    label = PORTABLE_CALLOUT_LABELS.get(callout_type, callout_type)
-    if platform == 'xhs' and callout_type == 'key':
-        label = '重点'
     content = text_inline_to_platform(content)
-    if not content:
-        return f'【{label}】'
-    return f'【{label}】{content}'
+    return content
 
 def render_platform_list_item(index, text, platform):
     if platform == 'xhs':
@@ -1135,9 +1155,9 @@ def inline_tokens_to_platform_text(children, platform):
         elif child.type == 'code_inline':
             parts.append(child.content)
         elif child.type in ('strong_open', 'mark_open'):
-            parts.append('【')
+            parts.append('「')
         elif child.type in ('strong_close', 'mark_close'):
-            parts.append('】')
+            parts.append('」')
         elif child.type == 'link_open':
             link_stack.append(child.attrGet('href') or '')
         elif child.type == 'link_close':
@@ -1236,7 +1256,7 @@ def _render_blockquote_platform(tokens, start_index, platform, counters, indent=
     if callout_type:
         return [render_platform_callout(callout_type, inner_text, platform)], end_index
     if inner_text:
-        return [f'【引用】{inner_text}'], end_index
+        return [f'「{inner_text}」'], end_index
     return [], end_index
 
 def _render_blocks_platform(tokens, platform, counters, indent=0):
@@ -1294,9 +1314,18 @@ def _render_blocks_platform(tokens, platform, counters, indent=0):
 
     return _trim_blank_lines(lines)
 
+def _compact_platform_lines(lines):
+    """Remove empty spacer lines that social editors expand into large gaps."""
+    compacted = []
+    for line in lines:
+        if not line.strip():
+            continue
+        compacted.append(line.rstrip())
+    return compacted
+
 def render_plain_platform_text(tokens, platform):
     counters = {'h2': 0, 'h3': 0}
-    return normalize_newlines('\n'.join(_render_blocks_platform(tokens, platform, counters)))
+    return '\n'.join(_compact_platform_lines(_render_blocks_platform(tokens, platform, counters)))
 
 def markdown_to_platform_text(md_text, platform, theme_name='modern-blue'):
     """
@@ -1306,11 +1335,13 @@ def markdown_to_platform_text(md_text, platform, theme_name='modern-blue'):
     Markdown. WeChat gets inline-styled HTML for pasting into the editor.
     """
     platform = normalize_platform_name(platform)
-    if platform not in ('zhihu', 'xhs', 'feishu', 'wechat', 'notion'):
+    if platform not in ('zhihu', 'zhihu-html', 'xhs', 'feishu', 'wechat', 'notion'):
         raise ValueError(f"Unsupported platform: {platform}")
 
     if platform in ('feishu', 'notion'):
         return markdown_to_portable_markdown(md_text)
+    if platform == 'zhihu-html':
+        return markdown_to_zhihu_html(md_text, theme_name=theme_name)
     if platform == 'wechat':
         return markdown_to_wechat_html(md_text, theme_name=theme_name)
 
@@ -1695,7 +1726,7 @@ def prepare_tokens_for_wechat(tokens, theme):
         'h3': f'font-size:18px;line-height:1.5;color:{accent};margin:28px 0 14px;font-weight:700;',
     }
 
-    for token in tokens:
+    for index, token in enumerate(tokens):
         if token.type == 'heading_open':
             _append_inline_style(
                 token,
@@ -1705,19 +1736,22 @@ def prepare_tokens_for_wechat(tokens, theme):
                 )
             )
         elif token.type == 'paragraph_open':
-            _append_inline_style(token, f'margin:0 0 18px;line-height:1.8;color:{text};font-size:16px;')
+            margin = '0' if _is_inside_open_token(tokens, index, 'blockquote_open') else '0 0 18px'
+            _append_inline_style(token, f'margin:{margin};line-height:1.8;color:{text};font-size:16px;')
         elif token.type == 'blockquote_open':
             if token.meta.get('callout') in ('summary', 'key'):
                 _append_inline_style(
                     token,
                     f'margin:24px 0;padding:14px 18px;border-left:4px solid {strong_border};'
                     f'background:{strong_bg};border-radius:6px;color:{text};font-weight:600;'
+                    'display:flex;flex-direction:column;justify-content:center;'
                 )
             else:
                 _append_inline_style(
                     token,
                     f'margin:24px 0;padding:12px 18px;border-left:4px solid {quote_border};'
                     f'background:{quote_bg};border-radius:0 6px 6px 0;color:{text};'
+                    'display:flex;flex-direction:column;justify-content:center;'
                 )
                 if token.meta.get('callout') == 'quote':
                     _append_inline_style(token, 'font-style:italic;')
@@ -1764,6 +1798,112 @@ def prepare_tokens_for_wechat(tokens, theme):
                     )
 
     return tokens
+
+def prepare_tokens_for_zhihu_html(tokens):
+    """
+    Prepare compact inline HTML for Zhihu's rich-text editor.
+
+    Zhihu strips most color, background, and border styling on paste. Keep the
+    HTML semantic and compact so the pasted result still works after sanitizing.
+    """
+    border = '#d0d7de'
+
+    heading_styles = {
+        'h1': (
+            'margin:0 0 14px;font-size:24px;line-height:1.45;font-weight:700;text-align:left;'
+        ),
+        'h2': (
+            'margin:22px 0 10px;font-size:20px;line-height:1.5;font-weight:700;'
+        ),
+        'h3': (
+            'margin:18px 0 8px;font-size:18px;line-height:1.5;font-weight:700;'
+        ),
+    }
+
+    for index, token in enumerate(tokens):
+        if token.type == 'blockquote_open' and token.meta.get('callout') in ('summary', 'key'):
+            end_index = _container_end(tokens, index)
+            for child_index in range(index + 1, end_index):
+                if tokens[child_index].type == 'inline':
+                    _wrap_inline_children_in_strong(tokens[child_index])
+
+        if token.type == 'list_item_open' and token.meta.get('task') is not None:
+            end_index = _container_end(tokens, index)
+            inline_index = _first_inline_index(tokens, index, end_index)
+            if inline_index is not None and tokens[inline_index].children is not None:
+                marker = '■ ' if token.meta['task'].get('checked') else '□ '
+                tokens[inline_index].children.insert(0, _make_text_token(marker, tokens[inline_index]))
+                _refresh_inline_content(tokens[inline_index])
+
+        if token.type == 'heading_open':
+            _append_inline_style(
+                token,
+                heading_styles.get(
+                    token.tag,
+                    'margin:16px 0 8px;font-size:16px;line-height:1.6;font-weight:700;'
+                )
+            )
+        elif token.type == 'paragraph_open':
+            _append_inline_style(token, 'margin:0 0 10px;font-size:16px;line-height:1.75;')
+        elif token.type == 'blockquote_open':
+            _append_inline_style(
+                token,
+                f'margin:12px 0;padding:0 0 0 12px;border-left:4px solid {border};line-height:1.75;'
+            )
+            if token.meta.get('callout') == 'quote':
+                _append_inline_style(token, 'font-style:italic;')
+        elif token.type == 'table_open':
+            _append_inline_style(token, 'width:100%;border-collapse:collapse;margin:12px 0;font-size:15px;')
+        elif token.type in ('th_open', 'td_open'):
+            bg = 'font-weight:700;' if token.type == 'th_open' else ''
+            _append_inline_style(
+                token,
+                f'border:1px solid {border};padding:6px 8px;text-align:left;vertical-align:top;line-height:1.65;{bg}'
+            )
+        elif token.type in ('bullet_list_open', 'ordered_list_open'):
+            _append_inline_style(token, 'margin:0 0 10px;padding-left:22px;')
+        elif token.type == 'list_item_open':
+            _append_inline_style(token, 'margin:2px 0;line-height:1.75;')
+        elif token.type in ('fence', 'code_block'):
+            _append_inline_style(
+                token,
+                f'margin:12px 0;padding:10px;border:1px solid {border};border-radius:4px;'
+                'font-size:14px;line-height:1.6;white-space:pre-wrap;'
+            )
+        elif token.type == 'hr':
+            _append_inline_style(token, f'border:0;border-top:1px solid {border};margin:18px 0;')
+
+        if token.type == 'inline' and token.children:
+            for child in token.children:
+                if child.type == 'link_open':
+                    _append_inline_style(child, 'text-decoration:underline;')
+                elif child.type == 'mark_open':
+                    child.tag = 'strong'
+                    _append_inline_style(child, 'font-weight:700;')
+                elif child.type == 'mark_close':
+                    child.tag = 'strong'
+                elif child.type == 'strong_open':
+                    _append_inline_style(child, 'font-weight:700;')
+                elif child.type == 'code_inline':
+                    _append_inline_style(
+                        child,
+                        'padding:1px 4px;border-radius:3px;'
+                        'font-family:Menlo,Monaco,Consolas,monospace;font-size:0.92em;'
+                    )
+                elif child.type == 'image':
+                    _append_inline_style(child, 'display:block;max-width:100%;height:auto;margin:12px auto;')
+
+    return tokens
+
+def markdown_to_zhihu_html(md_text, theme_name='modern-blue'):
+    md = build_parser()
+    tokens = prepare_tokens_for_zhihu_html(parse_markdown_tokens(md_text, parser=md))
+    body = md.renderer.render(tokens, md.options, {})
+    section_style = (
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",'
+        '"Microsoft YaHei",Arial,sans-serif;font-size:16px;line-height:1.75;'
+    )
+    return f'<section style="{html.escape(section_style, quote=True)}">\n{body}</section>'
 
 def markdown_to_wechat_html(md_text, theme_name='modern-blue'):
     theme = THEMES.get(theme_name, THEMES['modern-blue'])
@@ -1870,13 +2010,22 @@ def markdown_to_html(md_text, theme_name='modern-blue', title=None):
   blockquote strong {{
     color: inherit;
   }}
+  blockquote > p:last-child {{
+    margin-bottom: 0;
+  }}
   .callout {{
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
     padding: 14px 20px;
     margin: 24px 0;
     border-radius: 6px;
     border-left: 4px solid {border_color};
     background-color: {css['quote_bg']};
     color: inherit;
+  }}
+  .callout > p:last-child {{
+    margin-bottom: 0;
   }}
   .callout-summary, .callout-key {{
     background-color: {css['strong_bg']};
@@ -2002,6 +2151,7 @@ USAGE = f"""Usage:
   python3 typeset.py input.md output.rtf --theme warm-peach
   python3 typeset.py input.md output.md modern-blue
   python3 typeset.py input.md output.zhihu.txt --platform zhihu
+  python3 typeset.py input.md output.zhihu.html --platform zhihu-html
   python3 typeset.py input.md output.xhs.txt --platform xhs
   python3 typeset.py input.md output.feishu.md --platform feishu
   python3 typeset.py input.md output.wechat.html --platform wechat
@@ -2017,8 +2167,8 @@ Themes:
 
 Note:
   Themes affect HTML/RTF visual styling. Markdown output is portable Markdown.
-  Platform output supports Zhihu/Xiaohongshu plain text, Feishu/Notion Markdown,
-  and WeChat inline HTML.
+  Platform output supports Zhihu/Xiaohongshu plain text, Zhihu rich HTML,
+  Feishu/Notion Markdown, and WeChat inline HTML.
 """
 
 def read_input_text(filepath):
@@ -2318,7 +2468,7 @@ def parse_cli_args(argv):
             if idx + 1 < len(args):
                 platform = normalize_platform_name(args[idx+1])
                 if platform is None:
-                    print("Error: --platform must be one of: zhihu, xhs, feishu, wechat, notion", file=sys.stderr)
+                    print("Error: --platform must be one of: zhihu, zhihu-html, xhs, feishu, wechat, notion", file=sys.stderr)
                     sys.exit(1)
                 args.pop(idx+1)
                 args.pop(idx)
@@ -2366,7 +2516,9 @@ def parse_cli_args(argv):
 
     if platform is None and out_path:
         lower_out = out_path.lower()
-        if lower_out.endswith('.zhihu.txt'):
+        if lower_out.endswith(('.zhihu.html', '.zhihu-rich.html', '.zhihu.rich.html')):
+            platform = 'zhihu-html'
+        elif lower_out.endswith('.zhihu.txt'):
             platform = 'zhihu'
         elif lower_out.endswith(('.xhs.txt', '.xiaohongshu.txt', '.rednote.txt')):
             platform = 'xhs'
@@ -2377,8 +2529,8 @@ def parse_cli_args(argv):
         elif lower_out.endswith(('.notion.md', '.notion.txt')):
             platform = 'notion'
 
-    if platform is not None and platform not in ('zhihu', 'xhs', 'feishu', 'wechat', 'notion'):
-        print("Error: --platform must be one of: zhihu, xhs, feishu, wechat, notion", file=sys.stderr)
+    if platform is not None and platform not in ('zhihu', 'zhihu-html', 'xhs', 'feishu', 'wechat', 'notion'):
+        print("Error: --platform must be one of: zhihu, zhihu-html, xhs, feishu, wechat, notion", file=sys.stderr)
         sys.exit(1)
 
     return filepath, out_path, theme, platform, title

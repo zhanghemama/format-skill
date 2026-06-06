@@ -32,10 +32,17 @@ def test_zhihu_and_xhs_platform_text_use_visible_formatting():
     zhihu = markdown_to_platform_text(SOURCE, 'zhihu')
     xhs = markdown_to_platform_text(SOURCE, 'xhs')
 
+    assert zhihu.startswith('《标题 A》\n')
     assert '一、小节 B' in zhihu
-    assert '【摘要】Josh 是 Baremetrics 的创始人' in zhihu
-    assert '【重点 A】' in zhihu
+    assert 'Josh 是 Baremetrics 的创始人' in zhihu
+    assert '「重点 A」' in zhihu
+    assert '【摘要】' not in zhihu
+    assert '【核心观点】' not in zhihu
+    assert '【重点】' not in xhs
+    assert '\n\n' not in zhihu
+    assert '\n\n' not in xhs
     assert '• ■ 完成 A' in zhihu
+    assert xhs.startswith('《标题 A》\n')
     assert '01｜小节 B' in xhs
     assert '1. ■ 完成 A' in xhs
 
@@ -58,6 +65,33 @@ def test_wechat_output_is_inline_html_without_style_block():
     assert 'style=' in rendered
     assert 'callout-summary' in rendered
     assert '<mark style=' in rendered
+
+
+def test_html_callout_text_is_vertically_centered():
+    rendered = markdown_to_html(SOURCE, theme_name='warm-peach')
+
+    assert '.callout {' in rendered
+    assert 'justify-content: center;' in rendered
+    assert '.callout > p:last-child' in rendered
+
+    wechat = markdown_to_platform_text(SOURCE, 'wechat', theme_name='warm-peach')
+    assert 'display:flex;flex-direction:column;justify-content:center;' in wechat
+    assert '<p style="margin:0;line-height:1.8;' in wechat
+
+
+def test_zhihu_html_is_compact_inline_rich_text():
+    rendered = markdown_to_platform_text(SOURCE, 'zhihu-html')
+
+    assert rendered.startswith('<section style=')
+    assert '<style>' not in rendered
+    assert '<h1 style=' in rendered
+    assert '<blockquote style=' in rendered
+    assert '<strong style=' in rendered
+    assert '<strong style="font-weight:700;">Josh 是 Baremetrics 的创始人</strong>' in rendered
+    assert 'color:' not in rendered
+    assert 'background' not in rendered
+    assert 'callout-summary' not in rendered
+    assert '【摘要】' not in rendered
 
 
 def test_html_title_override_and_new_themes():
@@ -83,6 +117,19 @@ def test_parse_cli_args_accepts_new_platforms_and_title():
     assert theme == 'serif-print'
     assert platform == 'wechat'
     assert title == '自定义'
+
+
+def test_parse_cli_args_auto_detects_zhihu_html():
+    filepath, out_path, theme, platform, title = parse_cli_args([
+        'input.md',
+        'output.zhihu.html',
+    ])
+
+    assert filepath == 'input.md'
+    assert out_path == 'output.zhihu.html'
+    assert theme == 'modern-blue'
+    assert platform == 'zhihu-html'
+    assert title is None
 
 
 def test_parse_cli_args_allows_stdin_mode():

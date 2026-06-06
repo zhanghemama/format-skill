@@ -156,16 +156,20 @@ python3 /path/to/format-skill/typeset.py input.md output.rtf --theme dark-cyber
 
 # Platform outputs
 python3 /path/to/format-skill/typeset.py input.md output.zhihu.txt --platform zhihu
+python3 /path/to/format-skill/typeset.py input.md output.zhihu.html --platform zhihu-html
 python3 /path/to/format-skill/typeset.py input.md output.xhs.txt --platform xhs
 python3 /path/to/format-skill/typeset.py input.md output.feishu.md --platform feishu
 python3 /path/to/format-skill/typeset.py input.md output.wechat.html --platform wechat
 python3 /path/to/format-skill/typeset.py input.md output.notion.md --platform notion
 ```
 
+知乎会清理粘贴进编辑器的颜色、背景和边框样式。`zhihu-html` 只承诺保留标题、列表、表格、引用块和重点加粗，不把主题色作为核心效果。
+
 `input.md` 应当是 **Phase 2 已经加好结构标记的** Markdown 文件。`typeset.py` 只负责基础结构化和渲染，不做摘要、核心观点、金句等深度语义判断。
 
 Renderer notes:
 - Markdown parsing is handled by `markdown-it-py`, so links, images, inline code, fenced code blocks, strikethrough, nested lists, task lists, tables, and horizontal rules are supported.
+- Zhihu rich HTML output is compact inline HTML for copying rendered browser content into Zhihu; emphasis should use semantic bold instead of relying on color or background fills.
 - WeChat output is inline-styled HTML without a `<style>` block.
 - RTF input prefers macOS `textutil`, with `striprtf` fallback on other environments.
 - RTF image output is `[图片：alt]` placeholder in the current version.
