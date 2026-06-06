@@ -1,7 +1,7 @@
 # Article Typesetter Skill
 
 ## Description
-A specialized skill to auto-format and typeset poorly structured text and articles into standard, highly compatible Markdown, HTML, and macOS native RTF. The skill is **semantically intelligent**: it identifies summary paragraphs, hidden bullet patterns, and tabular data, and applies the right structural emphasis instead of blanket-coloring every paragraph.
+A specialized skill to auto-format and typeset poorly structured text and articles into standard, highly compatible Markdown, HTML, native RTF, and platform-specific outputs. The skill is **semantically intelligent**: it identifies summary paragraphs, hidden bullet patterns, and tabular data, and applies the right structural emphasis instead of blanket-coloring every paragraph.
 
 ---
 
@@ -105,12 +105,14 @@ After the user confirms the decision list:
 
 ## Styling Templates (Themes)
 
-四种主题，每种主题都已为新的 callout 和表格定义了配色：
+主题都已为 callout、表格、链接、代码块、分隔线和图片定义了配色：
 
 1. **`modern-blue`**（默认 / 科技博客）：Apple 蓝 + 暖琥珀 summary 背景。
 2. **`minimalist`**（正式打印稿）：高对比深灰，summary 用浅灰区分。
 3. **`warm-peach`**（文艺编辑）：暖珊瑚 + 蜜桃色 summary 背景。
 4. **`dark-cyber`**（深色模式）：青色 + 深青绿 summary 背景。
+5. **`github-light`**（技术文档）：接近 GitHub 阅读体验。
+6. **`serif-print`**（打印长文）：衬线字体、打印友好。
 
 ---
 
@@ -146,8 +148,24 @@ python3 /path/to/format-skill/typeset.py input.md output.md
 # HTML (Warm Peach Theme)
 python3 /path/to/format-skill/typeset.py input.md output.html --theme warm-peach
 
+# HTML title override
+python3 /path/to/format-skill/typeset.py input.md output.html --theme github-light --title "Custom Title"
+
 # RTF (Dark Cyber Theme)
 python3 /path/to/format-skill/typeset.py input.md output.rtf --theme dark-cyber
+
+# Platform outputs
+python3 /path/to/format-skill/typeset.py input.md output.zhihu.txt --platform zhihu
+python3 /path/to/format-skill/typeset.py input.md output.xhs.txt --platform xhs
+python3 /path/to/format-skill/typeset.py input.md output.feishu.md --platform feishu
+python3 /path/to/format-skill/typeset.py input.md output.wechat.html --platform wechat
+python3 /path/to/format-skill/typeset.py input.md output.notion.md --platform notion
 ```
 
-`input.md` 应当是 **Phase 2 已经加好结构标记的** Markdown 文件。`typeset.py` 只负责渲染，不做语义分析。
+`input.md` 应当是 **Phase 2 已经加好结构标记的** Markdown 文件。`typeset.py` 只负责基础结构化和渲染，不做摘要、核心观点、金句等深度语义判断。
+
+Renderer notes:
+- Markdown parsing is handled by `markdown-it-py`, so links, images, inline code, fenced code blocks, strikethrough, nested lists, task lists, tables, and horizontal rules are supported.
+- WeChat output is inline-styled HTML without a `<style>` block.
+- RTF input prefers macOS `textutil`, with `striprtf` fallback on other environments.
+- RTF image output is `[图片：alt]` placeholder in the current version.

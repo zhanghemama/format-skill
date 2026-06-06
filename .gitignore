@@ -1,3 +1,7 @@
 __pycache__/
 .claude/settings.local.json
 HISTORY_REWRITE_OPERATIONS.md
+test.xhs.txt
+ai-typesetting-tool-source.md
+ai-typesetting-tool.xhs.txt
+.pytest_cache/

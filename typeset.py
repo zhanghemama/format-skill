@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
+import html
 import re
 import subprocess
 import sys
+
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
 
 # Styling Theme Databases
 THEMES = {
@@ -31,6 +35,11 @@ THEMES = {
             'strong_border': '#f4a300',
             'table_header_bg': '#e8f0fe',
             'table_border': '#c8d2e1',
+            'code_bg': '#f5f7fb',
+            'code_text': '#1f2937',
+            'link_color': '#006adc',
+            'hr_color': '#c8d2e1',
+            'img_caption': '#5f6f83',
             'font_family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif'
         }
     },
@@ -58,6 +67,11 @@ THEMES = {
             'strong_border': '#505050',
             'table_header_bg': '#f5f5f5',
             'table_border': '#d2d2d2',
+            'code_bg': '#f6f6f6',
+            'code_text': '#202020',
+            'link_color': '#404040',
+            'hr_color': '#d2d2d2',
+            'img_caption': '#666666',
             'font_family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif'
         }
     },
@@ -85,6 +99,11 @@ THEMES = {
             'strong_border': '#e6614a',
             'table_header_bg': '#fcf0dc',
             'table_border': '#dcc8b4',
+            'code_bg': '#fff6ea',
+            'code_text': '#4a342b',
+            'link_color': '#d64f3c',
+            'hr_color': '#e7c7ad',
+            'img_caption': '#7a6258',
             'font_family': 'Georgia, "Songti SC", "STSong", "PingFang SC", serif'
         }
     },
@@ -112,7 +131,76 @@ THEMES = {
             'strong_border': '#00c8b4',
             'table_header_bg': '#263232',
             'table_border': '#3c4b4b',
+            'code_bg': '#262b2f',
+            'code_text': '#e8f5f2',
+            'link_color': '#54e7d4',
+            'hr_color': '#3c4b4b',
+            'img_caption': '#aab8b6',
             'font_family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", sans-serif'
+        }
+    },
+    'github-light': {
+        'fonts': ('Helvetica', 'PingFangSC-Regular'),
+        'fonts_bold': ('Helvetica-Bold', 'PingFangSC-Medium'),
+        'colors_rtf': (
+            (255, 255, 255),
+            (36, 41, 47),
+            (9, 105, 218),
+            (246, 248, 250),
+            (255, 245, 176),
+            (221, 244, 255),
+            (246, 248, 250),
+            (208, 215, 222)
+        ),
+        'css': {
+            'bg': '#ffffff',
+            'text': '#24292f',
+            'accent': '#0969da',
+            'quote_bg': '#f6f8fa',
+            'quote_border': '#d0d7de',
+            'highlight': '#fff5b1',
+            'strong_bg': '#ddf4ff',
+            'strong_border': '#0969da',
+            'table_header_bg': '#f6f8fa',
+            'table_border': '#d0d7de',
+            'code_bg': '#f6f8fa',
+            'code_text': '#24292f',
+            'link_color': '#0969da',
+            'hr_color': '#d0d7de',
+            'img_caption': '#57606a',
+            'font_family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, "PingFang SC", "Microsoft YaHei", sans-serif'
+        }
+    },
+    'serif-print': {
+        'fonts': ('Georgia', 'SongtiSC-Regular'),
+        'fonts_bold': ('Georgia-Bold', 'SongtiSC-Bold'),
+        'colors_rtf': (
+            (255, 255, 255),
+            (32, 31, 29),
+            (92, 65, 40),
+            (248, 248, 246),
+            (255, 241, 184),
+            (247, 232, 201),
+            (244, 241, 236),
+            (205, 197, 186)
+        ),
+        'css': {
+            'bg': '#ffffff',
+            'text': '#201f1d',
+            'accent': '#5c4128',
+            'quote_bg': '#f8f8f6',
+            'quote_border': '#a58b72',
+            'highlight': '#fff1b8',
+            'strong_bg': '#f7e8c9',
+            'strong_border': '#8a633f',
+            'table_header_bg': '#f4f1ec',
+            'table_border': '#cdc5ba',
+            'code_bg': '#f5f3ef',
+            'code_text': '#2d2926',
+            'link_color': '#684a2f',
+            'hr_color': '#cdc5ba',
+            'img_caption': '#6f675e',
+            'font_family': 'Georgia, "Times New Roman", "Songti SC", "STSong", "PingFang SC", serif'
         }
     }
 }
@@ -128,6 +216,17 @@ CALLOUT_TYPES = {
     'note':    {'role': 'soft',   'bold': False, 'italic': False},
     'quote':   {'role': 'soft',   'bold': False, 'italic': True},
 }
+
+CALLOUT_RE = re.compile(r'^\[!(\w+)\]\s*')
+TASK_RE = re.compile(r'^\[([ xX])\]\s+')
+HIGHLIGHT_RE = re.compile(r'==([^=]+)==')
+
+def build_parser():
+    """Build the CommonMark/GFM parser used by the new token pipeline."""
+    return (
+        MarkdownIt("commonmark", {"html": False, "linkify": False, "typographer": False})
+        .enable(["table", "strikethrough"])
+    )
 
 def add_cjk_spacing(text):
     """
@@ -195,6 +294,145 @@ def normalize_text_content(text):
     text = add_cjk_spacing(text)
     text = normalize_punctuation(text)
     return text
+
+def _container_end(tokens, start_index):
+    """Return the inclusive close-token index for a block token."""
+    level = 0
+    for index in range(start_index, len(tokens)):
+        level += tokens[index].nesting
+        if index > start_index and level == 0:
+            return index
+    return len(tokens) - 1
+
+def _first_inline_index(tokens, start_index, end_index):
+    for index in range(start_index + 1, end_index):
+        if tokens[index].type == 'inline':
+            return index
+    return None
+
+def _first_text_child(inline_token):
+    if not inline_token.children:
+        return None
+    first_child = inline_token.children[0]
+    return first_child if first_child.type == 'text' else None
+
+def _refresh_inline_content(inline_token):
+    if not inline_token.children:
+        inline_token.content = ''
+        return
+    inline_token.content = ''.join(
+        child.content for child in inline_token.children
+        if child.type in ('text', 'code_inline', 'html_inline')
+    )
+
+def _make_text_token(content, base_token):
+    token = Token('text', '', 0)
+    token.content = content
+    token.level = base_token.level
+    return token
+
+def _make_mark_token(token_type, nesting, base_token):
+    token = Token(token_type, 'mark', nesting)
+    token.markup = '=='
+    token.level = base_token.level
+    return token
+
+def _transform_text_child(child):
+    """Normalize a text token and split ==highlight== into mark tokens."""
+    pieces = []
+    cursor = 0
+    for match in HIGHLIGHT_RE.finditer(child.content):
+        before = child.content[cursor:match.start()]
+        if before:
+            pieces.append(_make_text_token(normalize_text_content(before), child))
+        pieces.append(_make_mark_token('mark_open', 1, child))
+        pieces.append(_make_text_token(normalize_text_content(match.group(1)), child))
+        pieces.append(_make_mark_token('mark_close', -1, child))
+        cursor = match.end()
+
+    after = child.content[cursor:]
+    if after:
+        pieces.append(_make_text_token(normalize_text_content(after), child))
+
+    if pieces:
+        return pieces
+
+    child.content = normalize_text_content(child.content)
+    return [child] if child.content else []
+
+def _transform_inline(inline_token):
+    if not inline_token.children:
+        return
+
+    transformed = []
+    for child in inline_token.children:
+        if child.type == 'text':
+            transformed.extend(_transform_text_child(child))
+        else:
+            transformed.append(child)
+
+    inline_token.children = transformed
+    _refresh_inline_content(inline_token)
+
+def _transform_callout(tokens, blockquote_index):
+    end_index = _container_end(tokens, blockquote_index)
+    inline_index = _first_inline_index(tokens, blockquote_index, end_index)
+    if inline_index is None:
+        return
+
+    first_child = _first_text_child(tokens[inline_index])
+    if first_child is None:
+        return
+
+    match = CALLOUT_RE.match(first_child.content)
+    if not match:
+        return
+
+    callout_type = match.group(1).lower()
+    if callout_type not in CALLOUT_TYPES:
+        return
+
+    tokens[blockquote_index].meta['callout'] = callout_type
+    first_child.content = first_child.content[match.end():]
+    _refresh_inline_content(tokens[inline_index])
+
+def _transform_task_item(tokens, list_item_index):
+    end_index = _container_end(tokens, list_item_index)
+    inline_index = _first_inline_index(tokens, list_item_index, end_index)
+    if inline_index is None:
+        return
+
+    first_child = _first_text_child(tokens[inline_index])
+    if first_child is None:
+        return
+
+    match = TASK_RE.match(first_child.content)
+    if not match:
+        return
+
+    tokens[list_item_index].meta['task'] = {'checked': match.group(1).lower() == 'x'}
+    first_child.content = first_child.content[match.end():]
+    _refresh_inline_content(tokens[inline_index])
+
+def transform_tokens(tokens):
+    """Apply Article Typesetter additions on top of markdown-it-py's token stream."""
+    for index, token in enumerate(tokens):
+        if token.type == 'blockquote_open':
+            _transform_callout(tokens, index)
+        elif token.type == 'list_item_open':
+            _transform_task_item(tokens, index)
+
+    for token in tokens:
+        if token.type == 'inline':
+            _transform_inline(token)
+
+    return tokens
+
+def parse_markdown_tokens(text, parser=None):
+    """Parse Markdown and apply token-level transformations."""
+    md = parser or build_parser()
+    tokens = md.parse(text)
+    return transform_tokens(tokens)
 
 # A table separator row contains only pipes, dashes, colons and spaces.
 _TABLE_SEP_RE = re.compile(r'^\|?[\s:|-]+\|?$')
@@ -319,6 +557,283 @@ def render_table_rtf(header, rows):
         parts.append(render_row(row, is_header=False))
     parts.append('\\pard\\par')
     return '\n'.join(parts)
+
+def render_table_rtf_cells(header, rows):
+    """Render already-formatted RTF cell contents as a table."""
+    num_cols = max(len(header), max((len(row) for row in rows), default=0))
+    if num_cols == 0:
+        return ''
+
+    total_width = 9000
+    col_width = total_width // num_cols
+    parts = ['\\pard\\par']
+
+    def render_row(cells, is_header):
+        bg_directive = '\\clcbpat7' if is_header else ''
+        row_parts = ['\\trowd\\trgaph108\\trleft0']
+        for col_index in range(num_cols):
+            right_edge = col_width * (col_index + 1)
+            row_parts.append(
+                '\\clbrdrt\\brdrs\\brdrw10\\brdrcf8'
+                '\\clbrdrl\\brdrs\\brdrw10\\brdrcf8'
+                '\\clbrdrb\\brdrs\\brdrw10\\brdrcf8'
+                '\\clbrdrr\\brdrs\\brdrw10\\brdrcf8'
+                f'{bg_directive}\\cellx{right_edge}'
+            )
+        bold_open = '\\b ' if is_header else ''
+        bold_close = '\\b0 ' if is_header else ''
+        for col_index in range(num_cols):
+            cell_text = cells[col_index] if col_index < len(cells) else ''
+            row_parts.append(
+                f'\\pard\\intbl\\f1\\fs24\\cf2 {bold_open}{cell_text}{bold_close}\\cell'
+            )
+        row_parts.append('\\row')
+        return ''.join(row_parts)
+
+    parts.append(render_row(header, is_header=True))
+    for row in rows:
+        parts.append(render_row(row, is_header=False))
+    parts.append('\\pard\\par')
+    return '\n'.join(parts)
+
+def inline_tokens_to_rtf(children):
+    if not children:
+        return ''
+
+    parts = []
+    link_stack = []
+    for child in children:
+        if child.type == 'text':
+            parts.append(text_to_rtf_content(child.content))
+        elif child.type == 'code_inline':
+            parts.append(f'\\f2\\fs22\\cf3 {text_to_rtf_content(child.content)}\\cf2\\f1\\fs24 ')
+        elif child.type == 'softbreak':
+            parts.append('\\line ')
+        elif child.type == 'hardbreak':
+            parts.append('\\line ')
+        elif child.type == 'strong_open':
+            parts.append('\\b ')
+        elif child.type == 'strong_close':
+            parts.append('\\b0 ')
+        elif child.type == 'em_open':
+            parts.append('\\i ')
+        elif child.type == 'em_close':
+            parts.append('\\i0 ')
+        elif child.type == 's_open':
+            parts.append('\\strike ')
+        elif child.type == 's_close':
+            parts.append('\\strike0 ')
+        elif child.type == 'mark_open':
+            parts.append('\\highlight5 ')
+        elif child.type == 'mark_close':
+            parts.append('\\highlight0 ')
+        elif child.type == 'link_open':
+            link_stack.append(child.attrGet('href') or '')
+            parts.append('\\cf3 ')
+        elif child.type == 'link_close':
+            href = link_stack.pop() if link_stack else ''
+            if href:
+                parts.append(f'\\cf2 {text_to_rtf_content(" (" + href + ")")}')
+            else:
+                parts.append('\\cf2 ')
+        elif child.type == 'image':
+            alt = child.content or child.attrGet('alt') or '图片'
+            parts.append(text_to_rtf_content(f'[图片：{alt}]'))
+        elif child.content:
+            parts.append(text_to_rtf_content(child.content))
+    return ''.join(parts)
+
+def _inline_tokens_to_plain_text(children):
+    if not children:
+        return ''
+    parts = []
+    for child in children:
+        if child.type in ('text', 'code_inline', 'image'):
+            parts.append(child.content)
+    return ''.join(parts)
+
+def _collect_table_rtf(tokens, start_index):
+    end_index = _container_end(tokens, start_index)
+    rows = []
+    current_row = None
+    index = start_index + 1
+
+    while index < end_index:
+        token = tokens[index]
+        if token.type == 'tr_open':
+            current_row = []
+        elif token.type == 'tr_close':
+            if current_row is not None:
+                rows.append(current_row)
+            current_row = None
+        elif token.type in ('th_open', 'td_open') and current_row is not None:
+            inline_index = _first_inline_index(tokens, index, _container_end(tokens, index))
+            cell_text = ''
+            if inline_index is not None:
+                cell_text = inline_tokens_to_rtf(tokens[inline_index].children)
+            current_row.append(cell_text)
+        index += 1
+
+    header = rows[0] if rows else []
+    body_rows = rows[1:] if len(rows) > 1 else []
+    return header, body_rows, end_index
+
+def _collect_plain_rtf_lines(tokens):
+    lines = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token.type in ('paragraph_open', 'heading_open'):
+            inline_index = _first_inline_index(tokens, index, _container_end(tokens, index))
+            if inline_index is not None:
+                lines.append(inline_tokens_to_rtf(tokens[inline_index].children))
+            index = _container_end(tokens, index) + 1
+            continue
+        if token.type in ('bullet_list_open', 'ordered_list_open'):
+            rendered, end_index = _render_list_rtf(tokens, index, depth=1)
+            lines.append(rendered)
+            index = end_index + 1
+            continue
+        if token.type in ('fence', 'code_block'):
+            lines.append(text_to_rtf_content(token.content.rstrip('\n')))
+        index += 1
+    return lines
+
+def _render_blockquote_rtf(tokens, start_index):
+    end_index = _container_end(tokens, start_index)
+    callout_type = tokens[start_index].meta.get('callout')
+    lines = _collect_plain_rtf_lines(tokens[start_index + 1:end_index])
+    content = '\\par '.join(line for line in lines if line)
+
+    cfg = CALLOUT_TYPES.get(callout_type or 'note', CALLOUT_TYPES['note'])
+    bold_open = '\\b ' if cfg['bold'] else ''
+    bold_close = '\\b0 ' if cfg['bold'] else ''
+    italic_open = '\\i ' if cfg['italic'] else ''
+    italic_close = '\\i0 ' if cfg['italic'] else ''
+
+    rendered = (
+        f'\\pard\\tx720\\li720\\ri720\\pardirnatural\\partightenfactor0'
+        f'\\f1\\fs24\\cf2 {bold_open}{italic_open}'
+        f'{content}'
+        f'{italic_close}{bold_close}\\par'
+    )
+    return rendered, end_index
+
+def _render_list_rtf(tokens, start_index, depth=0):
+    end_index = _container_end(tokens, start_index)
+    ordered = tokens[start_index].type == 'ordered_list_open'
+    start_number = tokens[start_index].attrGet('start')
+    number = int(start_number) if start_number else 1
+    rendered = []
+    index = start_index + 1
+    li = 720 + depth * 360
+
+    while index < end_index:
+        token = tokens[index]
+        if token.type != 'list_item_open':
+            index += 1
+            continue
+
+        item_end = _container_end(tokens, index)
+        inline_index = _first_inline_index(tokens, index, item_end)
+        item_text = inline_tokens_to_rtf(tokens[inline_index].children) if inline_index is not None else ''
+
+        task = token.meta.get('task')
+        if task is not None:
+            marker = '☑' if task.get('checked') else '☐'
+        elif ordered:
+            marker = f'{number}.'
+        else:
+            marker = '•'
+
+        rendered.append(
+            f'\\pard\\tx{li}\\li{li}\\fi-360\\pardirnatural\\partightenfactor0'
+            f'\\f1\\fs24\\cf2 {text_to_rtf_content(marker)} {item_text}\\par'
+        )
+        number += 1
+
+        child_index = index + 1
+        while child_index < item_end:
+            child = tokens[child_index]
+            if child.type in ('bullet_list_open', 'ordered_list_open'):
+                nested, nested_end = _render_list_rtf(tokens, child_index, depth + 1)
+                rendered.append(nested)
+                child_index = nested_end + 1
+                continue
+            child_index += 1
+
+        index = item_end + 1
+
+    return '\n'.join(rendered), end_index
+
+def _render_code_rtf(token):
+    lines = token.content.rstrip('\n').split('\n') if token.content else ['']
+    rendered = [
+        '\\pard\\li360\\ri360\\pardirnatural\\partightenfactor0\\f2\\fs22\\cf3 '
+        + text_to_rtf_content(line)
+        + '\\par'
+        for line in lines
+    ]
+    rendered.append('\\cf2\\f1\\fs24')
+    return '\n'.join(rendered)
+
+def render_rtf_tokens(tokens):
+    parts = []
+    index = 0
+
+    while index < len(tokens):
+        token = tokens[index]
+
+        if token.type == 'heading_open':
+            inline_index = _first_inline_index(tokens, index, _container_end(tokens, index))
+            title = inline_tokens_to_rtf(tokens[inline_index].children) if inline_index is not None else ''
+            level = int(token.tag[1]) if token.tag.startswith('h') else 1
+            fs = HEADING_FS_RTF.get(level, 24)
+            parts.append(
+                f'\\par\\par \\pard\\pardirnatural\\partightenfactor0'
+                f'\\f1\\fs{fs}\\b\\cf3 {title}\\b0\\cf2\\f1\\fs24\\par'
+            )
+            index = _container_end(tokens, index) + 1
+            continue
+
+        if token.type == 'paragraph_open':
+            inline_index = _first_inline_index(tokens, index, _container_end(tokens, index))
+            text = inline_tokens_to_rtf(tokens[inline_index].children) if inline_index is not None else ''
+            parts.append(f'\\pard\\pardirnatural\\partightenfactor0\\f1\\fs24\\cf2 {text}\\par')
+            index = _container_end(tokens, index) + 1
+            continue
+
+        if token.type == 'blockquote_open':
+            rendered, end_index = _render_blockquote_rtf(tokens, index)
+            parts.append(rendered)
+            index = end_index + 1
+            continue
+
+        if token.type in ('bullet_list_open', 'ordered_list_open'):
+            rendered, end_index = _render_list_rtf(tokens, index)
+            parts.append(rendered)
+            index = end_index + 1
+            continue
+
+        if token.type == 'table_open':
+            header, rows, end_index = _collect_table_rtf(tokens, index)
+            parts.append(render_table_rtf_cells(header, rows))
+            index = end_index + 1
+            continue
+
+        if token.type in ('fence', 'code_block'):
+            parts.append(_render_code_rtf(token))
+            index += 1
+            continue
+
+        if token.type == 'hr':
+            parts.append('\\pard\\qc\\cf3 - - -\\cf2\\par')
+            index += 1
+            continue
+
+        index += 1
+
+    return '\n\n'.join(part for part in parts if part)
 
 def parse_callout(block):
     """
@@ -495,6 +1010,13 @@ PLATFORM_ALIASES = {
     'xhs': 'xhs',
     'xiaohongshu': 'xhs',
     'rednote': 'xhs',
+    'feishu': 'feishu',
+    'lark': 'feishu',
+    'wechat': 'wechat',
+    'weixin': 'wechat',
+    'wx': 'wechat',
+    'gongzhonghao': 'wechat',
+    'notion': 'notion',
 }
 
 def markdown_inline_to_portable(text):
@@ -502,68 +1024,24 @@ def markdown_inline_to_portable(text):
     return re.sub(r'==([^=]+)==', r'**\1**', text)
 
 def render_portable_callout(callout_type, content):
-    """Render typed callouts as ordinary blockquotes with bold labels."""
-    label = PORTABLE_CALLOUT_LABELS.get(callout_type, callout_type)
+    """Render typed callouts as ordinary unlabeled blockquotes."""
     content = markdown_inline_to_portable(content)
     lines = content.split('\n') if content else ['']
 
-    first_content = lines[0].strip() if lines else ''
-    first_line = f'> **{label}**'
-    first_line += f'：{first_content}' if first_content else '：'
-
-    rendered = [first_line]
-    for line in lines[1:]:
+    rendered = []
+    for line in lines:
         rendered.append(f'> {line}' if line else '>')
     return '\n'.join(rendered)
 
 def markdown_to_portable_markdown(md_text):
     """
-    Convert structured Markdown used by this renderer into portable Markdown.
+    Convert structured Markdown into portable GFM.
 
-    Portable Markdown keeps headings, lists, blockquotes, tables, and bold text,
-    but removes renderer-specific markers such as [!summary] and ==highlight==.
+    Standard Markdown/GFM structures are preserved. Article Typesetter private
+    markers are downgraded: typed callouts become labeled blockquotes, and
+    ==highlight== becomes bold text.
     """
-    rendered_blocks = []
-
-    for btype, block in split_blocks(md_text):
-        block = block.strip()
-        if not block:
-            continue
-
-        if btype == 'quote':
-            callout = parse_callout(block)
-            if callout is not None:
-                callout_type, content = callout
-                rendered_blocks.append(render_portable_callout(callout_type, content))
-                continue
-
-            quote_lines = []
-            for line in block.split('\n'):
-                line = line.strip()
-                if line.startswith('> '):
-                    quote_lines.append('> ' + markdown_inline_to_portable(line[2:].strip()))
-                elif line == '>':
-                    quote_lines.append('>')
-                elif line.startswith('>'):
-                    quote_lines.append('> ' + markdown_inline_to_portable(line[1:].strip()))
-            rendered_blocks.append('\n'.join(quote_lines))
-            continue
-
-        if btype == 'table':
-            table_lines = []
-            for line in block.split('\n'):
-                if '-' in line and _TABLE_SEP_RE.match(line):
-                    table_lines.append(line)
-                else:
-                    table_lines.append(markdown_inline_to_portable(line))
-            rendered_blocks.append('\n'.join(table_lines))
-            continue
-
-        rendered_blocks.append('\n'.join(
-            markdown_inline_to_portable(line) for line in block.split('\n')
-        ))
-
-    return normalize_newlines('\n\n'.join(rendered_blocks))
+    return render_portable_markdown(parse_markdown_tokens(md_text))
 
 def normalize_platform_name(platform):
     if not platform:
@@ -645,103 +1123,218 @@ def render_platform_table(header, rows, platform):
 
     return '\n'.join(lines)
 
-def markdown_to_platform_text(md_text, platform):
-    """
-    Render Markdown-like source into plain text suitable for Zhihu/Xiaohongshu.
+def inline_tokens_to_platform_text(children, platform):
+    if not children:
+        return ''
 
-    These platforms do not reliably parse pasted Markdown source. The output is
-    therefore visible plain text: numbered headings, bracketed labels, safe list
-    markers, and table rows flattened into readable lines.
+    parts = []
+    link_stack = []
+    for child in children:
+        if child.type == 'text':
+            parts.append(child.content)
+        elif child.type == 'code_inline':
+            parts.append(child.content)
+        elif child.type in ('strong_open', 'mark_open'):
+            parts.append('【')
+        elif child.type in ('strong_close', 'mark_close'):
+            parts.append('】')
+        elif child.type == 'link_open':
+            link_stack.append(child.attrGet('href') or '')
+        elif child.type == 'link_close':
+            href = link_stack.pop() if link_stack else ''
+            if href:
+                parts.append(f'（{href}）')
+        elif child.type == 'image':
+            alt = child.content or child.attrGet('alt') or '图片'
+            parts.append(f'[图片：{alt}]')
+        elif child.content:
+            parts.append(child.content)
+    return ''.join(parts).strip()
+
+def _collect_table_for_platform(tokens, start_index, platform):
+    end_index = _container_end(tokens, start_index)
+    rows = []
+    current_row = None
+    index = start_index + 1
+
+    while index < end_index:
+        token = tokens[index]
+        if token.type == 'tr_open':
+            current_row = []
+        elif token.type == 'tr_close':
+            if current_row is not None:
+                rows.append(current_row)
+            current_row = None
+        elif token.type in ('th_open', 'td_open') and current_row is not None:
+            inline_index = _first_inline_index(tokens, index, _container_end(tokens, index))
+            cell_text = ''
+            if inline_index is not None:
+                cell_text = inline_tokens_to_platform_text(tokens[inline_index].children, platform)
+            current_row.append(cell_text)
+        index += 1
+
+    header = rows[0] if rows else []
+    body_rows = rows[1:] if len(rows) > 1 else []
+    return header, body_rows, end_index
+
+def _render_code_platform(token):
+    lines = token.content.rstrip('\n').split('\n') if token.content else ['']
+    return ['    ' + line for line in lines]
+
+def _render_list_platform(tokens, start_index, platform, indent=0):
+    end_index = _container_end(tokens, start_index)
+    ordered = tokens[start_index].type == 'ordered_list_open'
+    start_number = tokens[start_index].attrGet('start')
+    number = int(start_number) if start_number else 1
+    rendered = []
+    index = start_index + 1
+
+    while index < end_index:
+        token = tokens[index]
+        if token.type != 'list_item_open':
+            index += 1
+            continue
+
+        item_end = _container_end(tokens, index)
+        inline_index = _first_inline_index(tokens, index, item_end)
+        text = ''
+        if inline_index is not None:
+            text = inline_tokens_to_platform_text(tokens[inline_index].children, platform)
+
+        task = token.meta.get('task')
+        if task is not None:
+            task_box = '■' if task.get('checked') else '□'
+            text = f'{task_box} {text}'.strip()
+
+        if ordered:
+            line = f'{number}. {text}'
+        else:
+            line = render_platform_list_item(number, text, platform)
+        rendered.append(' ' * indent + line)
+        number += 1
+
+        child_index = index + 1
+        while child_index < item_end:
+            child = tokens[child_index]
+            if child.type in ('bullet_list_open', 'ordered_list_open'):
+                nested, nested_end = _render_list_platform(tokens, child_index, platform, indent + 2)
+                rendered.extend(nested)
+                child_index = nested_end + 1
+                continue
+            child_index += 1
+
+        index = item_end + 1
+
+    return rendered, end_index
+
+def _render_blockquote_platform(tokens, start_index, platform, counters, indent=0):
+    end_index = _container_end(tokens, start_index)
+    inner_lines = _render_blocks_platform(tokens[start_index + 1:end_index], platform, counters, indent=0)
+    inner_text = normalize_newlines('\n'.join(_trim_blank_lines(inner_lines)))
+    callout_type = tokens[start_index].meta.get('callout')
+
+    if callout_type:
+        return [render_platform_callout(callout_type, inner_text, platform)], end_index
+    if inner_text:
+        return [f'【引用】{inner_text}'], end_index
+    return [], end_index
+
+def _render_blocks_platform(tokens, platform, counters, indent=0):
+    lines = []
+    index = 0
+
+    while index < len(tokens):
+        token = tokens[index]
+
+        if token.type == 'heading_open':
+            inline_index = _first_inline_index(tokens, index, _container_end(tokens, index))
+            text = inline_tokens_to_platform_text(tokens[inline_index].children, platform) if inline_index is not None else ''
+            level = int(token.tag[1]) if token.tag.startswith('h') else 1
+            _append_block(lines, [' ' * indent + render_platform_heading(level, text, platform, counters)])
+            index = _container_end(tokens, index) + 1
+            continue
+
+        if token.type == 'paragraph_open':
+            inline_index = _first_inline_index(tokens, index, _container_end(tokens, index))
+            text = inline_tokens_to_platform_text(tokens[inline_index].children, platform) if inline_index is not None else ''
+            _append_block(lines, [' ' * indent + text] if text else [])
+            index = _container_end(tokens, index) + 1
+            continue
+
+        if token.type in ('bullet_list_open', 'ordered_list_open'):
+            block_lines, end_index = _render_list_platform(tokens, index, platform, indent)
+            _append_block(lines, block_lines)
+            index = end_index + 1
+            continue
+
+        if token.type == 'blockquote_open':
+            block_lines, end_index = _render_blockquote_platform(tokens, index, platform, counters, indent)
+            _append_block(lines, [' ' * indent + line for line in block_lines])
+            index = end_index + 1
+            continue
+
+        if token.type == 'table_open':
+            header, rows, end_index = _collect_table_for_platform(tokens, index, platform)
+            rendered = render_platform_table(header, rows, platform).splitlines()
+            _append_block(lines, [' ' * indent + line for line in rendered])
+            index = end_index + 1
+            continue
+
+        if token.type in ('fence', 'code_block'):
+            _append_block(lines, _render_code_platform(token))
+            index += 1
+            continue
+
+        if token.type == 'hr':
+            _append_block(lines, ['——'])
+            index += 1
+            continue
+
+        index += 1
+
+    return _trim_blank_lines(lines)
+
+def render_plain_platform_text(tokens, platform):
+    counters = {'h2': 0, 'h3': 0}
+    return normalize_newlines('\n'.join(_render_blocks_platform(tokens, platform, counters)))
+
+def markdown_to_platform_text(md_text, platform, theme_name='modern-blue'):
+    """
+    Render Markdown-like source into platform-oriented text or inline HTML.
+
+    Zhihu/Xiaohongshu get visible plain text. Feishu/Notion get portable
+    Markdown. WeChat gets inline-styled HTML for pasting into the editor.
     """
     platform = normalize_platform_name(platform)
-    if platform not in ('zhihu', 'xhs'):
+    if platform not in ('zhihu', 'xhs', 'feishu', 'wechat', 'notion'):
         raise ValueError(f"Unsupported platform: {platform}")
 
-    rendered_blocks = []
-    counters = {'h2': 0, 'h3': 0}
+    if platform in ('feishu', 'notion'):
+        return markdown_to_portable_markdown(md_text)
+    if platform == 'wechat':
+        return markdown_to_wechat_html(md_text, theme_name=theme_name)
 
-    for btype, block in split_blocks(md_text):
-        block = block.strip()
-        if not block:
-            continue
-
-        if btype == 'heading':
-            level, text = parse_heading(block)
-            rendered_blocks.append(render_platform_heading(level, text, platform, counters))
-            continue
-
-        if btype == 'quote':
-            callout = parse_callout(block)
-            if callout is not None:
-                callout_type, content = callout
-                rendered_blocks.append(render_platform_callout(callout_type, content, platform))
-                continue
-
-            lines = []
-            for line in block.split('\n'):
-                line = line.strip()
-                if line.startswith('> '):
-                    lines.append(text_inline_to_platform(line[2:].strip()))
-                elif line.startswith('>'):
-                    lines.append(text_inline_to_platform(line[1:].strip()))
-            quote_text = '\n'.join(line for line in lines if line)
-            if quote_text:
-                rendered_blocks.append(f'【引用】{quote_text}')
-            continue
-
-        if btype == 'table':
-            table = parse_table(block)
-            if table is not None:
-                header, rows = table
-                rendered_blocks.append(render_platform_table(header, rows, platform))
-                continue
-
-        if btype == 'ul':
-            items = []
-            index = 1
-            for line in block.split('\n'):
-                s = line.strip()
-                m = LIST_UL_RE.match(s)
-                if m:
-                    items.append(render_platform_list_item(
-                        index,
-                        text_inline_to_platform(s[m.end():].strip()),
-                        platform
-                    ))
-                    index += 1
-            rendered_blocks.append('\n'.join(items))
-            continue
-
-        if btype == 'ol':
-            items = []
-            for line in block.split('\n'):
-                s = line.strip()
-                m = LIST_OL_RE.match(s)
-                if m:
-                    items.append(f'{m.group(1)}. {text_inline_to_platform(s[m.end():].strip())}')
-            rendered_blocks.append('\n'.join(items))
-            continue
-
-        rendered_blocks.append('\n'.join(
-            text_inline_to_platform(line) for line in block.split('\n') if line.strip()
-        ))
-
-    return normalize_newlines('\n\n'.join(block for block in rendered_blocks if block.strip()))
+    return render_plain_platform_text(parse_markdown_tokens(md_text), platform)
 
 def markdown_to_rtf(md_text, theme_name='modern-blue'):
     """
-    Converts Markdown to a gorgeous, native macOS RTF (Rich Text Format) file based on styling theme.
+    Render Markdown to native RTF using the markdown-it-py token pipeline.
     """
     theme = THEMES.get(theme_name, THEMES['modern-blue'])
     font_eng, font_cjk = theme['fonts']
-    font_eng_bold, font_cjk_bold = theme['fonts_bold']
 
     c_bg, c_txt, c_acc, c_qbg, c_hl, c_strong, c_thdr, c_tbrd = theme['colors_rtf']
+    if sum(c_bg) < 384:
+        # RTF readers render dark page backgrounds inconsistently. Keep RTF on
+        # a light canvas and preserve the theme through accent colors instead.
+        c_bg = (255, 255, 255)
+        c_txt = (36, 41, 47)
+        c_qbg = (246, 248, 250)
+        c_hl = (255, 245, 176)
+        c_strong = (221, 244, 240)
+        c_thdr = (246, 248, 250)
+        c_tbrd = (208, 215, 222)
 
-    # RTF Color Table construction: \colortbl;\red[R]\green[G]\blue[B];...
-    # Color indices (1-based after leading empty entry):
-    # 1: bg, 2: text, 3: accent, 4: quote_bg, 5: highlight,
-    # 6: strong_bg (summary/key callouts), 7: table_header_bg, 8: table_border
     colortbl = (
         f"\\red{c_bg[0]}\\green{c_bg[1]}\\blue{c_bg[2]};"
         f"\\red{c_txt[0]}\\green{c_txt[1]}\\blue{c_txt[2]};"
@@ -753,100 +1346,14 @@ def markdown_to_rtf(md_text, theme_name='modern-blue'):
         f"\\red{c_tbrd[0]}\\green{c_tbrd[1]}\\blue{c_tbrd[2]};"
     )
 
-    rtf_body = []
-
-    for btype, block in split_blocks(md_text):
-        block = block.strip()
-        if not block:
-            continue
-
-        # Headings H1–H6 (accent color cf3, bold, size by level)
-        if btype == 'heading':
-            level, title = parse_heading(block)
-            fs = HEADING_FS_RTF.get(level, 24)
-            title_formatted = format_markdown_inline_rtf(title)
-            rtf_body.append(f'\\par\\par \\pard\\pardirnatural\\partightenfactor0\\f1\\fs{fs}\\b\\cf3 {title_formatted}\\b0\\cf0\\f0\\fs24\\par')
-            continue
-        # Blockquote / typed callout
-        if btype == 'quote':
-            callout = parse_callout(block)
-            if callout is not None:
-                callout_type, content = callout
-                cfg = CALLOUT_TYPES[callout_type]
-                # Choose background color index based on role
-                bg_idx = 6 if cfg['role'] == 'strong' else 4
-                bold_open = '\\b ' if cfg['bold'] else ''
-                bold_close = '\\b0 ' if cfg['bold'] else ''
-                italic_open = '\\i ' if cfg['italic'] else ''
-                italic_close = '\\i0 ' if cfg['italic'] else ''
-                content_formatted = format_markdown_inline_rtf(content)
-                rtf_body.append(
-                    f'\\pard\\tx720\\li720\\ri720\\pardirnatural\\partightenfactor0'
-                    f'\\f1\\fs24\\cb{bg_idx} {bold_open}{italic_open}{content_formatted}'
-                    f'{italic_close}{bold_close}\\cb1\\par'
-                )
-                continue
-            # Plain Blockquote (no callout type) — soft bg
-            lines = []
-            for line in block.split('\n'):
-                line = line.strip()
-                if line.startswith('> '):
-                    line = line[2:].strip()
-                elif line == '>':
-                    line = ''
-                elif line.startswith('>'):
-                    line = line[1:].strip()
-                lines.append(line)
-            quote_text = '\n'.join(lines)
-            quote_formatted = format_markdown_inline_rtf(quote_text)
-            rtf_body.append(f'\\pard\\tx720\\li720\\ri720\\pardirnatural\\partightenfactor0\\f1\\fs24\\cb4 {quote_formatted}\\par')
-            continue
-        # Markdown Table
-        if btype == 'table':
-            table = parse_table(block)
-            if table is not None:
-                header, rows = table
-                rtf_body.append(render_table_rtf(header, rows))
-                continue
-            # Not a valid table; fall through to paragraph rendering below.
-        # Unordered list (bullet character \u8226 with hanging indent)
-        if btype == 'ul':
-            list_items = []
-            for line in block.split('\n'):
-                s = line.strip()
-                m = LIST_UL_RE.match(s)
-                if m:
-                    item_text = s[m.end():].strip()
-                    item_formatted = format_markdown_inline_rtf(item_text)
-                    list_items.append(f'\\pard\\tx720\\li720\\fi-360\\pardirnatural\\partightenfactor0\\f1\\fs24 \\uc0\\u8226  {item_formatted}\\par')
-            rtf_body.append('\n'.join(list_items))
-            continue
-        # Ordered list (preserves the source numbers as a hanging label)
-        if btype == 'ol':
-            list_items = []
-            for line in block.split('\n'):
-                s = line.strip()
-                m = LIST_OL_RE.match(s)
-                if m:
-                    num = m.group(1)
-                    item_text = s[m.end():].strip()
-                    item_formatted = format_markdown_inline_rtf(item_text)
-                    list_items.append(f'\\pard\\tx720\\li720\\fi-360\\pardirnatural\\partightenfactor0\\f1\\fs24 {num}. {item_formatted}\\par')
-            rtf_body.append('\n'.join(list_items))
-            continue
-        # Normal Paragraph (uses main text color cf2)
-        para_formatted = format_markdown_inline_rtf(block)
-        rtf_body.append(f'\\pard\\pardirnatural\\partightenfactor0\\f1\\fs24\\cf2 {para_formatted}\\par')
-            
-    rtf_content = '\n\n'.join(rtf_body)
+    rtf_content = render_rtf_tokens(parse_markdown_tokens(md_text))
     
-    # Complete RTF template
     rtf_doc = f"""{{\\rtf1\\ansi\\ansicpg1252\\cocoartf2822
-\\cocoatextscaling0\\cocoaplatform0{{\\fonttbl\\f0\\fswiss\\fcharset0 {font_eng};\\f1\\fnil\\fcharset134 {font_cjk};}}
+\\cocoatextscaling0\\cocoaplatform0{{\\fonttbl\\f0\\fswiss\\fcharset0 {font_eng};\\f1\\fnil\\fcharset134 {font_cjk};\\f2\\fmodern\\fcharset0 Courier;}}
 {{\\colortbl;{colortbl}}}
 {{\\*\\expandedcolortbl;;}}
 \\paperw11900\\paperh16840\\margl1440\\margr1440\\vieww11520\\viewh8400\\viewkind0
-\\cb1\\pard\\tx720\\tx1440\\tx2160\\tx2880\\tx3600\\tx4320\\tx5040\\tx5760\\tx6480\\tx7200\\tx7920\\tx8640\\pardirnatural\\partightenfactor0
+\\pard\\tx720\\tx1440\\tx2160\\tx2880\\tx3600\\tx4320\\tx5040\\tx5760\\tx6480\\tx7200\\tx7920\\tx8640\\pardirnatural\\partightenfactor0
 {rtf_content}
 }}"""
     return rtf_doc
@@ -874,112 +1381,427 @@ def render_table_html(header, rows, css):
     parts.append('</tbody></table>')
     return ''.join(parts)
 
-def markdown_to_html(md_text, theme_name='modern-blue', title="Typeset Article"):
+def inline_tokens_to_portable(children):
+    if not children:
+        return ''
+
+    parts = []
+    link_stack = []
+    for child in children:
+        if child.type == 'text':
+            parts.append(child.content)
+        elif child.type == 'code_inline':
+            parts.append(f'`{child.content}`')
+        elif child.type in ('strong_open', 'mark_open'):
+            parts.append('**')
+        elif child.type in ('strong_close', 'mark_close'):
+            parts.append('**')
+        elif child.type == 'em_open':
+            parts.append('*')
+        elif child.type == 'em_close':
+            parts.append('*')
+        elif child.type == 's_open':
+            parts.append('~~')
+        elif child.type == 's_close':
+            parts.append('~~')
+        elif child.type == 'link_open':
+            link_stack.append(child.attrGet('href') or '')
+            parts.append('[')
+        elif child.type == 'link_close':
+            href = link_stack.pop() if link_stack else ''
+            parts.append(f']({href})')
+        elif child.type == 'image':
+            alt = child.content or child.attrGet('alt') or ''
+            src = child.attrGet('src') or ''
+            title = child.attrGet('title')
+            title_part = f' "{title}"' if title else ''
+            parts.append(f'![{alt}]({src}{title_part})')
+        elif child.content:
+            parts.append(child.content)
+    return ''.join(parts)
+
+def _trim_blank_lines(lines):
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines
+
+def _append_block(lines, block_lines):
+    block_lines = _trim_blank_lines(list(block_lines))
+    if not block_lines:
+        return
+    if lines and lines[-1] != '':
+        lines.append('')
+    lines.extend(block_lines)
+    lines.append('')
+
+def _render_table_portable(tokens, start_index):
+    end_index = _container_end(tokens, start_index)
+    rows = []
+    current_row = None
+    index = start_index + 1
+
+    while index < end_index:
+        token = tokens[index]
+        if token.type == 'tr_open':
+            current_row = []
+        elif token.type == 'tr_close':
+            if current_row is not None:
+                rows.append(current_row)
+            current_row = None
+        elif token.type in ('th_open', 'td_open') and current_row is not None:
+            inline_index = _first_inline_index(tokens, index, _container_end(tokens, index))
+            cell_text = ''
+            if inline_index is not None:
+                cell_text = inline_tokens_to_portable(tokens[inline_index].children)
+            current_row.append(cell_text.replace('|', '\\|').strip())
+        index += 1
+
+    if not rows:
+        return [], end_index
+
+    header = rows[0]
+    body_rows = rows[1:]
+    separator = ['---'] * len(header)
+    rendered = [
+        '| ' + ' | '.join(header) + ' |',
+        '| ' + ' | '.join(separator) + ' |',
+    ]
+    for row in body_rows:
+        padded = row + [''] * (len(header) - len(row))
+        rendered.append('| ' + ' | '.join(padded[:len(header)]) + ' |')
+    return rendered, end_index
+
+def _render_list_item_portable(tokens, start_index, end_index, marker, indent):
+    lines = []
+    first_text = ''
+    child_blocks = []
+    index = start_index + 1
+
+    while index < end_index:
+        token = tokens[index]
+        if token.type == 'paragraph_open':
+            inline_index = _first_inline_index(tokens, index, _container_end(tokens, index))
+            if inline_index is not None:
+                text = inline_tokens_to_portable(tokens[inline_index].children)
+                if not first_text:
+                    first_text = text
+                elif text:
+                    child_blocks.append(('paragraph', [text]))
+            index = _container_end(tokens, index) + 1
+            continue
+        if token.type in ('bullet_list_open', 'ordered_list_open'):
+            nested, nested_end = _render_list_portable(tokens, index, indent + 2)
+            child_blocks.append(('list', nested))
+            index = nested_end + 1
+            continue
+        if token.type == 'blockquote_open':
+            quote_lines, quote_end = _render_blockquote_portable(tokens, index, indent + 2)
+            child_blocks.append(('quote', quote_lines))
+            index = quote_end + 1
+            continue
+        if token.type in ('fence', 'code_block'):
+            child_blocks.append(('code', _render_code_portable(token, indent + 2)))
+        index += 1
+
+    task = tokens[start_index].meta.get('task')
+    if task is not None:
+        checked = 'x' if task.get('checked') else ' '
+        first_text = f'[{checked}] {first_text}'.rstrip()
+
+    prefix = ' ' * indent + marker
+    lines.append(prefix + first_text)
+    continuation_prefix = ' ' * (indent + len(marker))
+    for _, block_lines in child_blocks:
+        for line in _trim_blank_lines(list(block_lines)):
+            lines.append(continuation_prefix + line if line else '')
+    return lines
+
+def _render_list_portable(tokens, start_index, indent=0):
+    end_index = _container_end(tokens, start_index)
+    ordered = tokens[start_index].type == 'ordered_list_open'
+    start_number = tokens[start_index].attrGet('start')
+    number = int(start_number) if start_number else 1
+    rendered = []
+    index = start_index + 1
+
+    while index < end_index:
+        token = tokens[index]
+        if token.type == 'list_item_open':
+            marker = f'{number}. ' if ordered else '- '
+            item_end = _container_end(tokens, index)
+            rendered.extend(_render_list_item_portable(tokens, index, item_end, marker, indent))
+            number += 1
+            index = item_end + 1
+            continue
+        index += 1
+    return rendered, end_index
+
+def _render_code_portable(token, indent=0):
+    if token.type == 'fence':
+        info = token.info.strip()
+        lines = [' ' * indent + f'```{info}'.rstrip()]
+        lines.extend(' ' * indent + line for line in token.content.rstrip('\n').split('\n'))
+        lines.append(' ' * indent + '```')
+        return lines
+
+    lines = []
+    for line in token.content.rstrip('\n').split('\n'):
+        lines.append(' ' * indent + '    ' + line)
+    return lines
+
+def _render_blockquote_portable(tokens, start_index, indent=0):
+    end_index = _container_end(tokens, start_index)
+    inner_lines = _render_blocks_portable(tokens[start_index + 1:end_index], indent=0)
+    inner_lines = _trim_blank_lines(inner_lines)
+
+    rendered = []
+    quote_prefix = ' ' * indent + '> '
+    for line in inner_lines:
+        rendered.append((' ' * indent + '>' if not line else quote_prefix + line))
+    return rendered, end_index
+
+def _render_blocks_portable(tokens, indent=0):
+    lines = []
+    index = 0
+
+    while index < len(tokens):
+        token = tokens[index]
+
+        if token.type == 'heading_open':
+            inline_index = _first_inline_index(tokens, index, _container_end(tokens, index))
+            text = inline_tokens_to_portable(tokens[inline_index].children) if inline_index is not None else ''
+            level = int(token.tag[1]) if token.tag.startswith('h') else 1
+            _append_block(lines, [' ' * indent + ('#' * level) + ' ' + text])
+            index = _container_end(tokens, index) + 1
+            continue
+
+        if token.type == 'paragraph_open':
+            inline_index = _first_inline_index(tokens, index, _container_end(tokens, index))
+            text = inline_tokens_to_portable(tokens[inline_index].children) if inline_index is not None else ''
+            _append_block(lines, [' ' * indent + text] if text else [])
+            index = _container_end(tokens, index) + 1
+            continue
+
+        if token.type in ('bullet_list_open', 'ordered_list_open'):
+            block_lines, end_index = _render_list_portable(tokens, index, indent)
+            _append_block(lines, block_lines)
+            index = end_index + 1
+            continue
+
+        if token.type == 'blockquote_open':
+            block_lines, end_index = _render_blockquote_portable(tokens, index, indent)
+            _append_block(lines, block_lines)
+            index = end_index + 1
+            continue
+
+        if token.type == 'table_open':
+            block_lines, end_index = _render_table_portable(tokens, index)
+            _append_block(lines, [' ' * indent + line for line in block_lines])
+            index = end_index + 1
+            continue
+
+        if token.type in ('fence', 'code_block'):
+            _append_block(lines, _render_code_portable(token, indent))
+            index += 1
+            continue
+
+        if token.type == 'hr':
+            _append_block(lines, [' ' * indent + '---'])
+            index += 1
+            continue
+
+        index += 1
+
+    return _trim_blank_lines(lines)
+
+def render_portable_markdown(tokens):
+    return normalize_newlines('\n'.join(_render_blocks_portable(tokens)))
+
+def _inline_plain_text(children):
+    if not children:
+        return ''
+    parts = []
+    for child in children:
+        if child.type in ('text', 'code_inline', 'image'):
+            parts.append(child.content)
+    return ''.join(parts).strip()
+
+def extract_title_from_tokens(tokens, fallback='Typeset Article'):
+    for index, token in enumerate(tokens):
+        if token.type == 'heading_open' and token.tag == 'h1':
+            inline_index = _first_inline_index(tokens, index, _container_end(tokens, index))
+            if inline_index is not None:
+                title = _inline_plain_text(tokens[inline_index].children)
+                if title:
+                    return title
+    return fallback
+
+def _html_checkbox_token(checked, base_token):
+    token = Token('html_inline', '', 0)
+    token.level = base_token.level
+    checked_attr = ' checked' if checked else ''
+    token.content = (
+        f'<input class="task-list-item-checkbox" type="checkbox" disabled{checked_attr}> '
+    )
+    return token
+
+def prepare_tokens_for_html(tokens):
+    for index, token in enumerate(tokens):
+        if token.type == 'blockquote_open' and token.meta.get('callout'):
+            callout_type = token.meta['callout']
+            token.tag = 'div'
+            token.attrJoin('class', f'callout callout-{callout_type}')
+            end_index = _container_end(tokens, index)
+            tokens[end_index].tag = 'div'
+        elif token.type == 'table_open':
+            token.attrJoin('class', 'typeset-table')
+        elif token.type == 'list_item_open' and token.meta.get('task') is not None:
+            token.attrJoin('class', 'task-list-item')
+            end_index = _container_end(tokens, index)
+            inline_index = _first_inline_index(tokens, index, end_index)
+            if inline_index is not None and tokens[inline_index].children is not None:
+                checked = tokens[index].meta['task'].get('checked')
+                tokens[inline_index].children.insert(
+                    0,
+                    _html_checkbox_token(checked, tokens[inline_index])
+                )
+                _refresh_inline_content(tokens[inline_index])
+    return tokens
+
+def _append_inline_style(token, style):
+    existing = token.attrGet('style')
+    token.attrSet('style', f'{existing}; {style}' if existing else style)
+
+def prepare_tokens_for_wechat(tokens, theme):
+    css = theme['css']
+    prepare_tokens_for_html(tokens)
+
+    accent = css['accent']
+    text = css['text']
+    quote_bg = css['quote_bg']
+    quote_border = css['quote_border']
+    strong_bg = css['strong_bg']
+    strong_border = css['strong_border']
+    code_bg = css.get('code_bg', quote_bg)
+    code_text = css.get('code_text', text)
+    link_color = css.get('link_color', accent)
+    table_border = css['table_border']
+
+    heading_styles = {
+        'h1': f'font-size:24px;line-height:1.5;color:{accent};text-align:center;margin:0 0 24px;font-weight:700;',
+        'h2': f'font-size:20px;line-height:1.5;color:{accent};margin:32px 0 16px;padding-bottom:8px;border-bottom:2px solid {quote_border};font-weight:700;',
+        'h3': f'font-size:18px;line-height:1.5;color:{accent};margin:28px 0 14px;font-weight:700;',
+    }
+
+    for token in tokens:
+        if token.type == 'heading_open':
+            _append_inline_style(
+                token,
+                heading_styles.get(
+                    token.tag,
+                    f'font-size:16px;line-height:1.6;color:{text};margin:22px 0 12px;font-weight:700;'
+                )
+            )
+        elif token.type == 'paragraph_open':
+            _append_inline_style(token, f'margin:0 0 18px;line-height:1.8;color:{text};font-size:16px;')
+        elif token.type == 'blockquote_open':
+            if token.meta.get('callout') in ('summary', 'key'):
+                _append_inline_style(
+                    token,
+                    f'margin:24px 0;padding:14px 18px;border-left:4px solid {strong_border};'
+                    f'background:{strong_bg};border-radius:6px;color:{text};font-weight:600;'
+                )
+            else:
+                _append_inline_style(
+                    token,
+                    f'margin:24px 0;padding:12px 18px;border-left:4px solid {quote_border};'
+                    f'background:{quote_bg};border-radius:0 6px 6px 0;color:{text};'
+                )
+                if token.meta.get('callout') == 'quote':
+                    _append_inline_style(token, 'font-style:italic;')
+        elif token.type == 'table_open':
+            _append_inline_style(token, 'width:100%;border-collapse:collapse;margin:24px 0;font-size:15px;')
+        elif token.type in ('th_open', 'td_open'):
+            bg = f'background:{css["table_header_bg"]};font-weight:600;color:{accent};' if token.type == 'th_open' else ''
+            _append_inline_style(
+                token,
+                f'border:1px solid {table_border};padding:8px 10px;text-align:left;vertical-align:top;{bg}'
+            )
+        elif token.type in ('bullet_list_open', 'ordered_list_open'):
+            _append_inline_style(token, 'margin:0 0 18px;padding-left:24px;')
+        elif token.type == 'list_item_open':
+            _append_inline_style(token, 'margin:0 0 8px;line-height:1.8;')
+        elif token.type in ('fence', 'code_block'):
+            _append_inline_style(
+                token,
+                f'background:{code_bg};color:{code_text};padding:12px;border-radius:6px;'
+                'font-size:14px;line-height:1.6;overflow-x:auto;'
+            )
+        elif token.type == 'hr':
+            _append_inline_style(token, f'border:0;border-top:1px solid {table_border};margin:28px auto;width:42%;')
+
+        if token.type == 'inline' and token.children:
+            for child in token.children:
+                if child.type == 'link_open':
+                    _append_inline_style(child, f'color:{link_color};text-decoration:underline;')
+                elif child.type == 'mark_open':
+                    _append_inline_style(
+                        child,
+                        f'background:{css["highlight"]};color:inherit;padding:2px 4px;border-radius:3px;'
+                    )
+                elif child.type == 'code_inline':
+                    _append_inline_style(
+                        child,
+                        f'background:{code_bg};color:{code_text};padding:2px 5px;border-radius:4px;'
+                        'font-family:Menlo,Monaco,Consolas,monospace;font-size:0.92em;'
+                    )
+                elif child.type == 'image':
+                    _append_inline_style(
+                        child,
+                        'display:block;max-width:100%;height:auto;margin:20px auto;border-radius:6px;'
+                    )
+
+    return tokens
+
+def markdown_to_wechat_html(md_text, theme_name='modern-blue'):
+    theme = THEMES.get(theme_name, THEMES['modern-blue'])
+    md = build_parser()
+    tokens = prepare_tokens_for_wechat(parse_markdown_tokens(md_text, parser=md), theme)
+    body = md.renderer.render(tokens, md.options, {})
+    css = theme['css']
+    section_style = (
+        f'font-family:{css["font_family"]};color:{css["text"]};'
+        'font-size:16px;line-height:1.8;'
+    )
+    return f'<section style="{html.escape(section_style, quote=True)}">\n{body}</section>'
+
+def markdown_to_html(md_text, theme_name='modern-blue', title=None):
     """
-    Converts simple Markdown text to highly compatible, beautifully styled HTML based on styling theme.
-    Block-by-block parsing: Heading(H1-H6) -> Callout -> Blockquote -> Table -> List(ul/ol) -> Paragraph.
+    Render Markdown to themed HTML using the markdown-it-py token pipeline.
     """
     theme = THEMES.get(theme_name, THEMES['modern-blue'])
     css = theme['css']
+    md = build_parser()
+    tokens = prepare_tokens_for_html(parse_markdown_tokens(md_text, parser=md))
+    fallback_title = title or 'Typeset Article'
+    html_title = fallback_title if title else extract_title_from_tokens(tokens, fallback_title)
+    html_body = md.renderer.render(tokens, md.options, {})
 
-    def esc(s):
-        return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-
-    rendered_blocks = []
-
-    for btype, block in split_blocks(md_text):
-        block = block.strip()
-        if not block:
-            continue
-
-        # Headings H1–H6 — parse structure first, escape only the text content
-        if btype == 'heading':
-            level, text = parse_heading(block)
-            rendered_blocks.append(f'<h{level}>{format_inline_html(esc(text))}</h{level}>')
-            continue
-        # Blockquote / typed callout — parse on raw block (before escaping) so '>' is recognized
-        if btype == 'quote':
-            callout = parse_callout(block)
-            if callout is not None:
-                callout_type, content = callout
-                cfg = CALLOUT_TYPES[callout_type]
-                content_html = format_inline_html(esc(content)).replace('\n', '<br>')
-                if cfg['bold']:
-                    content_html = f'<strong>{content_html}</strong>'
-                if cfg['italic']:
-                    content_html = f'<em>{content_html}</em>'
-                css_class = f'callout callout-{callout_type}'
-                rendered_blocks.append(f'<div class="{css_class}">{content_html}</div>')
-                continue
-            # Plain Blockquote
-            lines = []
-            for line in block.split('\n'):
-                line = line.strip()
-                if line.startswith('> '):
-                    lines.append(line[2:].strip())
-                elif line == '>':
-                    lines.append('')
-                elif line.startswith('>'):
-                    lines.append(line[1:].strip())
-            inner = format_inline_html(esc('\n'.join(lines))).replace('\n', '<br>')
-            rendered_blocks.append(f'<blockquote>{inner}</blockquote>')
-            continue
-        # Table
-        if btype == 'table':
-            table = parse_table(block)
-            if table is not None:
-                header, rows = table
-                escaped_header = [esc(c) for c in header]
-                escaped_rows = [[esc(c) for c in r] for r in rows]
-                rendered_blocks.append(render_table_html(escaped_header, escaped_rows, css))
-                continue
-            # Not a valid table; fall through to paragraph rendering below.
-        # Unordered list
-        if btype == 'ul':
-            items = []
-            for line in block.split('\n'):
-                s = line.strip()
-                m = LIST_UL_RE.match(s)
-                if m:
-                    items.append(f'<li>{format_inline_html(esc(s[m.end():].strip()))}</li>')
-            rendered_blocks.append('<ul>' + ''.join(items) + '</ul>')
-            continue
-        # Ordered list
-        if btype == 'ol':
-            items = []
-            for line in block.split('\n'):
-                s = line.strip()
-                m = LIST_OL_RE.match(s)
-                if m:
-                    items.append(f'<li>{format_inline_html(esc(s[m.end():].strip()))}</li>')
-            rendered_blocks.append('<ol>' + ''.join(items) + '</ol>')
-            continue
-        # Normal Paragraph
-        para = format_inline_html(esc(block)).replace('\n', '<br>')
-        rendered_blocks.append(f'<p>{para}</p>')
-
-    html_body = '\n\n'.join(rendered_blocks)
-
-    # Highlight pass (inline ==text==). Runs on already-escaped body so == markers are preserved.
-    highlight_style = (
-        f"background-color: {css['highlight']}; color: inherit; "
-        "padding: 2px 4px; border-radius: 3px;"
-    )
-    html_body = re.sub(
-        r'==([^=]+)==',
-        lambda m: f'<mark style="{highlight_style}">{m.group(1)}</mark>',
-        html_body
-    )
-    
-    # Dynamic dark mode text-color handling
     accent_text = css['accent']
     border_color = css['quote_border']
+    code_bg = css.get('code_bg', css.get('quote_bg', '#f6f8fa'))
+    code_text = css.get('code_text', css['text'])
+    link_color = css.get('link_color', css['accent'])
+    hr_color = css.get('hr_color', css['table_border'])
+    img_caption = css.get('img_caption', css['text'])
     
     template = f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>{title}</title>
+<title>{html.escape(html_title)}</title>
 <style>
   body {{
     font-family: {css['font_family']};
@@ -1089,8 +1911,81 @@ def markdown_to_html(md_text, theme_name='modern-blue', title="Typeset Article")
   li {{
     margin-bottom: 8px;
   }}
+  a {{
+    color: {link_color};
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+  }}
+  a:hover {{
+    border-bottom-color: {link_color};
+  }}
   strong {{
     color: inherit;
+  }}
+  em {{
+    font-style: italic;
+  }}
+  del, s {{
+    text-decoration: line-through;
+    opacity: 0.8;
+  }}
+  mark {{
+    background-color: {css['highlight']};
+    color: inherit;
+    padding: 2px 4px;
+    border-radius: 3px;
+  }}
+  code {{
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.92em;
+    background-color: {code_bg};
+    color: {code_text};
+    padding: 2px 5px;
+    border-radius: 4px;
+  }}
+  pre {{
+    background-color: {code_bg};
+    color: {code_text};
+    padding: 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    line-height: 1.6;
+    margin: 24px 0;
+  }}
+  pre code {{
+    display: block;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+  }}
+  img {{
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 24px auto;
+    border-radius: 6px;
+  }}
+  figcaption {{
+    color: {img_caption};
+    opacity: 0.75;
+    text-align: center;
+    font-size: 14px;
+    margin-top: -12px;
+    margin-bottom: 24px;
+  }}
+  hr {{
+    border: 0;
+    border-top: 1px solid {hr_color};
+    margin: 32px auto;
+    width: 40%;
+  }}
+  .task-list-item {{
+    list-style: none;
+    margin-left: -1.4em;
+  }}
+  .task-list-item-checkbox {{
+    margin-right: 8px;
+    vertical-align: -0.1em;
   }}
 </style>
 </head>
@@ -1103,14 +1998,18 @@ def markdown_to_html(md_text, theme_name='modern-blue', title="Typeset Article")
 
 USAGE = f"""Usage:
   python3 typeset.py input.md output.html --theme modern-blue
+  python3 typeset.py input.md output.html --theme github-light --title "Custom Title"
   python3 typeset.py input.md output.rtf --theme warm-peach
   python3 typeset.py input.md output.md modern-blue
   python3 typeset.py input.md output.zhihu.txt --platform zhihu
   python3 typeset.py input.md output.xhs.txt --platform xhs
+  python3 typeset.py input.md output.feishu.md --platform feishu
+  python3 typeset.py input.md output.wechat.html --platform wechat
+  python3 typeset.py input.md output.notion.md --platform notion
 
 Inputs:
   .md/.txt files are read as UTF-8 text.
-  .rtf files are converted to plain text with macOS textutil before typesetting.
+  .rtf files are converted to plain text with macOS textutil, or striprtf as fallback.
   Plain text without Markdown markers gets conservative headings and bullets.
 
 Themes:
@@ -1118,7 +2017,8 @@ Themes:
 
 Note:
   Themes affect HTML/RTF visual styling. Markdown output is portable Markdown.
-  Platform output is plain text designed for pasting into Zhihu/Xiaohongshu.
+  Platform output supports Zhihu/Xiaohongshu plain text, Feishu/Notion Markdown,
+  and WeChat inline HTML.
 """
 
 def read_input_text(filepath):
@@ -1132,15 +2032,16 @@ def read_input_text(filepath):
                 encoding='utf-8',
                 errors='replace'
             )
-        except FileNotFoundError as exc:
-            raise RuntimeError(
-                'RTF input requires macOS textutil. Convert the RTF to .txt first, '
-                'then run typeset.py on the .txt file.'
-            ) from exc
-        except subprocess.CalledProcessError as exc:
-            detail = exc.stderr.strip() if exc.stderr else str(exc)
-            raise RuntimeError(f'Failed to convert RTF input with textutil: {detail}') from exc
-        return result.stdout
+            return result.stdout
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            try:
+                from striprtf.striprtf import rtf_to_text
+            except ImportError as exc:
+                raise RuntimeError(
+                    'RTF input requires macOS textutil or the striprtf Python package.'
+                ) from exc
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                return rtf_to_text(f.read())
 
     with open(filepath, 'r', encoding='utf-8-sig') as f:
         return f.read()
@@ -1390,9 +2291,10 @@ def prepare_markdown_input(content):
 def parse_cli_args(argv):
     theme = 'modern-blue'
     platform = None
+    title = None
     args = list(argv)
 
-    if not args or args[0] in ('-h', '--help'):
+    if args and args[0] in ('-h', '--help'):
         print(USAGE)
         sys.exit(0)
 
@@ -1416,12 +2318,25 @@ def parse_cli_args(argv):
             if idx + 1 < len(args):
                 platform = normalize_platform_name(args[idx+1])
                 if platform is None:
-                    print("Error: --platform must be one of: zhihu, xhs", file=sys.stderr)
+                    print("Error: --platform must be one of: zhihu, xhs, feishu, wechat, notion", file=sys.stderr)
                     sys.exit(1)
                 args.pop(idx+1)
                 args.pop(idx)
             else:
                 print("Error: --platform requires a value", file=sys.stderr)
+                sys.exit(1)
+        except ValueError:
+            pass
+
+    if '--title' in args:
+        try:
+            idx = args.index('--title')
+            if idx + 1 < len(args):
+                title = args[idx+1]
+                args.pop(idx+1)
+                args.pop(idx)
+            else:
+                print("Error: --title requires a value", file=sys.stderr)
                 sys.exit(1)
         except ValueError:
             pass
@@ -1455,29 +2370,34 @@ def parse_cli_args(argv):
             platform = 'zhihu'
         elif lower_out.endswith(('.xhs.txt', '.xiaohongshu.txt', '.rednote.txt')):
             platform = 'xhs'
+        elif lower_out.endswith(('.feishu.txt', '.lark.txt', '.feishu.md', '.lark.md')):
+            platform = 'feishu'
+        elif lower_out.endswith(('.wechat.html', '.weixin.html', '.wx.html')):
+            platform = 'wechat'
+        elif lower_out.endswith(('.notion.md', '.notion.txt')):
+            platform = 'notion'
 
-    if platform is not None and platform not in ('zhihu', 'xhs'):
-        print("Error: --platform must be one of: zhihu, xhs", file=sys.stderr)
+    if platform is not None and platform not in ('zhihu', 'xhs', 'feishu', 'wechat', 'notion'):
+        print("Error: --platform must be one of: zhihu, xhs, feishu, wechat, notion", file=sys.stderr)
         sys.exit(1)
 
-    return filepath, out_path, theme, platform
+    return filepath, out_path, theme, platform, title
 
 def main():
-    filepath, out_path, theme, platform = parse_cli_args(sys.argv[1:])
+    filepath, out_path, theme, platform, title = parse_cli_args(sys.argv[1:])
 
     if filepath:
         try:
-            content = prepare_markdown_input(read_input_text(filepath))
-            markdown_out = typeset_to_markdown(content)
-	            
+            markdown_out = prepare_markdown_input(read_input_text(filepath))
+
             if out_path:
                 if platform:
-                    platform_text_out = markdown_to_platform_text(markdown_out, platform)
+                    platform_text_out = markdown_to_platform_text(markdown_out, platform, theme_name=theme)
                     with open(out_path, 'w', encoding='utf-8') as f:
                         f.write(platform_text_out)
-                    print(f"Successfully saved {platform} platform text to {out_path}")
+                    print(f"Successfully saved {platform} platform output to {out_path}")
                 elif out_path.endswith('.html'):
-                    html_out = markdown_to_html(markdown_out, theme_name=theme)
+                    html_out = markdown_to_html(markdown_out, theme_name=theme, title=title)
                     with open(out_path, 'w', encoding='utf-8') as f:
                         f.write(html_out)
                     print(f"Successfully typeset and saved {theme} HTML Rich Text to {out_path}")
@@ -1492,12 +2412,13 @@ def main():
                         f.write(portable_md_out)
                     print(f"Successfully typeset and saved portable Markdown to {out_path}")
                 else:
+                    portable_md_out = markdown_to_portable_markdown(markdown_out)
                     with open(out_path, 'w', encoding='utf-8') as f:
-                        f.write(markdown_out)
+                        f.write(portable_md_out)
                     print(f"Successfully typeset and saved normalized text to {out_path}")
             else:
                 if platform:
-                    print(markdown_to_platform_text(markdown_out, platform))
+                    print(markdown_to_platform_text(markdown_out, platform, theme_name=theme))
                 else:
                     # Print Markdown to stdout
                     print(markdown_to_portable_markdown(markdown_out))
@@ -1507,9 +2428,9 @@ def main():
     else:
         # Stream standard input
         content = sys.stdin.read()
-        markdown_out = typeset_to_markdown(prepare_markdown_input(content))
+        markdown_out = prepare_markdown_input(content)
         if platform:
-            print(markdown_to_platform_text(markdown_out, platform), end='')
+            print(markdown_to_platform_text(markdown_out, platform, theme_name=theme), end='')
         else:
             print(markdown_to_portable_markdown(markdown_out), end='')
 
