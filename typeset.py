@@ -1036,13 +1036,34 @@ PLATFORM_ALIASES = {
     'xiaohongshu': 'xhs',
     'rednote': 'xhs',
     'feishu': 'feishu',
+    'feishu-html': 'feishu-html',
+    'feishu_html': 'feishu-html',
+    'feishu-rich': 'feishu-html',
+    'feishu_rich': 'feishu-html',
     'lark': 'feishu',
+    'lark-html': 'feishu-html',
+    'lark_html': 'feishu-html',
     'wechat': 'wechat',
     'weixin': 'wechat',
     'wx': 'wechat',
     'gongzhonghao': 'wechat',
     'notion': 'notion',
+    'notion-html': 'notion-html',
+    'notion_html': 'notion-html',
+    'notion-rich': 'notion-html',
+    'notion_rich': 'notion-html',
 }
+SUPPORTED_PLATFORMS = (
+    'zhihu',
+    'zhihu-html',
+    'xhs',
+    'feishu',
+    'feishu-html',
+    'wechat',
+    'notion',
+    'notion-html',
+)
+SUPPORTED_PLATFORM_LABEL = ', '.join(SUPPORTED_PLATFORMS)
 
 def markdown_inline_to_portable(text):
     """Convert non-portable inline markers to widely supported Markdown."""
@@ -1335,11 +1356,15 @@ def markdown_to_platform_text(md_text, platform, theme_name='modern-blue'):
     Markdown. WeChat gets inline-styled HTML for pasting into the editor.
     """
     platform = normalize_platform_name(platform)
-    if platform not in ('zhihu', 'zhihu-html', 'xhs', 'feishu', 'wechat', 'notion'):
+    if platform not in SUPPORTED_PLATFORMS:
         raise ValueError(f"Unsupported platform: {platform}")
 
     if platform in ('feishu', 'notion'):
         return markdown_to_portable_markdown(md_text)
+    if platform == 'feishu-html':
+        return markdown_to_feishu_html(md_text)
+    if platform == 'notion-html':
+        return markdown_to_notion_html(md_text)
     if platform == 'zhihu-html':
         return markdown_to_zhihu_html(md_text, theme_name=theme_name)
     if platform == 'wechat':
@@ -1727,6 +1752,11 @@ def prepare_tokens_for_wechat(tokens, theme):
     }
 
     for index, token in enumerate(tokens):
+        if token.type == 'blockquote_open':
+            token.tag = 'section'
+            end_index = _container_end(tokens, index)
+            tokens[end_index].tag = 'section'
+
         if token.type == 'heading_open':
             _append_inline_style(
                 token,
@@ -1743,14 +1773,14 @@ def prepare_tokens_for_wechat(tokens, theme):
                 _append_inline_style(
                     token,
                     f'margin:24px 0;padding:14px 18px;border-left:4px solid {strong_border};'
-                    f'background:{strong_bg};border-radius:6px;color:{text};font-weight:600;'
+                    f'background-color:{strong_bg};border-radius:6px;color:{text};font-weight:600;'
                     'display:flex;flex-direction:column;justify-content:center;'
                 )
             else:
                 _append_inline_style(
                     token,
                     f'margin:24px 0;padding:12px 18px;border-left:4px solid {quote_border};'
-                    f'background:{quote_bg};border-radius:0 6px 6px 0;color:{text};'
+                    f'background-color:{quote_bg};border-radius:0 6px 6px 0;color:{text};'
                     'display:flex;flex-direction:column;justify-content:center;'
                 )
                 if token.meta.get('callout') == 'quote':
@@ -1758,7 +1788,7 @@ def prepare_tokens_for_wechat(tokens, theme):
         elif token.type == 'table_open':
             _append_inline_style(token, 'width:100%;border-collapse:collapse;margin:24px 0;font-size:15px;')
         elif token.type in ('th_open', 'td_open'):
-            bg = f'background:{css["table_header_bg"]};font-weight:600;color:{accent};' if token.type == 'th_open' else ''
+            bg = f'background-color:{css["table_header_bg"]};font-weight:600;color:{accent};' if token.type == 'th_open' else ''
             _append_inline_style(
                 token,
                 f'border:1px solid {table_border};padding:8px 10px;text-align:left;vertical-align:top;{bg}'
@@ -1770,7 +1800,7 @@ def prepare_tokens_for_wechat(tokens, theme):
         elif token.type in ('fence', 'code_block'):
             _append_inline_style(
                 token,
-                f'background:{code_bg};color:{code_text};padding:12px;border-radius:6px;'
+                f'background-color:{code_bg};color:{code_text};padding:12px;border-radius:6px;'
                 'font-size:14px;line-height:1.6;overflow-x:auto;'
             )
         elif token.type == 'hr':
@@ -1783,12 +1813,12 @@ def prepare_tokens_for_wechat(tokens, theme):
                 elif child.type == 'mark_open':
                     _append_inline_style(
                         child,
-                        f'background:{css["highlight"]};color:inherit;padding:2px 4px;border-radius:3px;'
+                        f'background-color:{css["highlight"]};color:inherit;padding:2px 4px;border-radius:3px;'
                     )
                 elif child.type == 'code_inline':
                     _append_inline_style(
                         child,
-                        f'background:{code_bg};color:{code_text};padding:2px 5px;border-radius:4px;'
+                        f'background-color:{code_bg};color:{code_text};padding:2px 5px;border-radius:4px;'
                         'font-family:Menlo,Monaco,Consolas,monospace;font-size:0.92em;'
                     )
                 elif child.type == 'image':
@@ -1895,6 +1925,187 @@ def prepare_tokens_for_zhihu_html(tokens):
 
     return tokens
 
+RICH_EDITOR_HTML_STYLES = {
+    'notion': {
+        'text': '#2f3437',
+        'muted': '#6b625c',
+        'accent': '#6f5f50',
+        'quote_border': '#d9d3ca',
+        'quote_bg': '#f7f6f3',
+        'strong_border': '#c9bcae',
+        'strong_bg': '#f4ede5',
+        'table_border': '#e3dfd8',
+        'table_header_bg': '#f7f6f3',
+        'highlight_bg': '#fff3bf',
+        'code_bg': '#f1f1ef',
+        'code_text': '#4d4a46',
+        'link': '#4f6f9f',
+        'section_style': (
+            'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",'
+            '"Microsoft YaHei",Arial,sans-serif;font-size:16px;line-height:1.75;'
+            'color:#2f3437;'
+        ),
+        'headings': {
+            'h1': (
+                'margin:0 0 18px;font-size:30px;line-height:1.35;font-weight:800;'
+                'color:#2f3437;'
+            ),
+            'h2': (
+                'margin:34px 0 14px;font-size:23px;line-height:1.45;font-weight:750;'
+                'color:#2f3437;border-bottom:1px solid #e9e5df;padding-bottom:8px;'
+            ),
+            'h3': (
+                'margin:26px 0 10px;font-size:19px;line-height:1.5;font-weight:700;'
+                'color:#4d4741;'
+            ),
+        },
+    },
+    'feishu': {
+        'text': '#1f2329',
+        'muted': '#646a73',
+        'accent': '#245bdb',
+        'quote_border': '#3370ff',
+        'quote_bg': '#eff6ff',
+        'strong_border': '#3370ff',
+        'strong_bg': '#e8f3ff',
+        'table_border': '#d8e3ff',
+        'table_header_bg': '#f0f5ff',
+        'highlight_bg': '#fff7d6',
+        'code_bg': '#f5f7fa',
+        'code_text': '#1f2329',
+        'link': '#245bdb',
+        'section_style': (
+            'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",'
+            '"Microsoft YaHei",Arial,sans-serif;font-size:16px;line-height:1.78;'
+            'color:#1f2329;'
+        ),
+        'headings': {
+            'h1': (
+                'margin:0 0 18px;font-size:30px;line-height:1.35;font-weight:800;'
+                'color:#1f2329;'
+            ),
+            'h2': (
+                'margin:34px 0 14px;font-size:23px;line-height:1.45;font-weight:750;'
+                'color:#245bdb;padding-left:10px;border-left:4px solid #3370ff;'
+            ),
+            'h3': (
+                'margin:26px 0 10px;font-size:19px;line-height:1.5;font-weight:700;'
+                'color:#245bdb;'
+            ),
+        },
+    },
+}
+
+def prepare_tokens_for_rich_editor_html(tokens, platform):
+    """
+    Prepare inline HTML for rich-paste editors while keeping each platform's
+    visual language distinct in preview and in editors that preserve styles.
+    """
+    styles = RICH_EDITOR_HTML_STYLES[platform]
+
+    for index, token in enumerate(tokens):
+        if token.type == 'blockquote_open' and token.meta.get('callout') in ('summary', 'key'):
+            end_index = _container_end(tokens, index)
+            for child_index in range(index + 1, end_index):
+                if tokens[child_index].type == 'inline':
+                    _wrap_inline_children_in_strong(tokens[child_index])
+
+        if token.type == 'list_item_open' and token.meta.get('task') is not None:
+            end_index = _container_end(tokens, index)
+            inline_index = _first_inline_index(tokens, index, end_index)
+            if inline_index is not None and tokens[inline_index].children is not None:
+                marker = '■ ' if token.meta['task'].get('checked') else '□ '
+                tokens[inline_index].children.insert(0, _make_text_token(marker, tokens[inline_index]))
+                _refresh_inline_content(tokens[inline_index])
+
+        if token.type == 'heading_open':
+            _append_inline_style(
+                token,
+                styles['headings'].get(
+                    token.tag,
+                    f'margin:20px 0 10px;font-size:16px;line-height:1.6;'
+                    f'font-weight:700;color:{styles["text"]};'
+                )
+            )
+        elif token.type == 'paragraph_open':
+            margin = '0' if _is_inside_open_token(tokens, index, 'blockquote_open') else '0 0 16px'
+            _append_inline_style(
+                token,
+                f'margin:{margin};font-size:16px;line-height:1.78;color:{styles["text"]};'
+            )
+        elif token.type == 'blockquote_open':
+            is_strong = token.meta.get('callout') in ('summary', 'key')
+            bg = styles['strong_bg'] if is_strong else styles['quote_bg']
+            border = styles['strong_border'] if is_strong else styles['quote_border']
+            weight = 'font-weight:650;' if is_strong else ''
+            _append_inline_style(
+                token,
+                f'margin:20px 0;padding:14px 18px;border-left:4px solid {border};'
+                f'background-color:{bg};border-radius:6px;color:{styles["text"]};'
+                f'line-height:1.78;{weight}'
+            )
+            if token.meta.get('callout') == 'quote':
+                _append_inline_style(token, f'font-style:italic;color:{styles["muted"]};')
+        elif token.type == 'table_open':
+            _append_inline_style(
+                token,
+                'width:100%;border-collapse:collapse;margin:20px 0;font-size:15px;'
+            )
+        elif token.type in ('th_open', 'td_open'):
+            header = (
+                f'background-color:{styles["table_header_bg"]};font-weight:700;'
+                f'color:{styles["accent"]};'
+                if token.type == 'th_open' else ''
+            )
+            _append_inline_style(
+                token,
+                f'border:1px solid {styles["table_border"]};padding:8px 10px;'
+                f'text-align:left;vertical-align:top;line-height:1.65;color:{styles["text"]};{header}'
+            )
+        elif token.type in ('bullet_list_open', 'ordered_list_open'):
+            _append_inline_style(token, 'margin:0 0 16px;padding-left:24px;')
+        elif token.type == 'list_item_open':
+            _append_inline_style(token, f'margin:3px 0;line-height:1.78;color:{styles["text"]};')
+        elif token.type in ('fence', 'code_block'):
+            _append_inline_style(
+                token,
+                f'margin:16px 0;padding:12px;border-radius:6px;'
+                f'background-color:{styles["code_bg"]};color:{styles["code_text"]};'
+                'font-size:14px;line-height:1.6;white-space:pre-wrap;'
+            )
+        elif token.type == 'hr':
+            _append_inline_style(
+                token,
+                f'border:0;border-top:1px solid {styles["table_border"]};margin:24px 0;'
+            )
+
+        if token.type == 'inline' and token.children:
+            for child in token.children:
+                if child.type == 'link_open':
+                    _append_inline_style(child, f'color:{styles["link"]};text-decoration:underline;')
+                elif child.type == 'mark_open':
+                    child.tag = 'strong'
+                    _append_inline_style(
+                        child,
+                        f'font-weight:700;background-color:{styles["highlight_bg"]};'
+                        'padding:1px 3px;border-radius:3px;'
+                    )
+                elif child.type == 'mark_close':
+                    child.tag = 'strong'
+                elif child.type == 'strong_open':
+                    _append_inline_style(child, 'font-weight:700;')
+                elif child.type == 'code_inline':
+                    _append_inline_style(
+                        child,
+                        f'background-color:{styles["code_bg"]};color:{styles["code_text"]};'
+                        'padding:2px 5px;border-radius:4px;'
+                        'font-family:Menlo,Monaco,Consolas,monospace;font-size:0.92em;'
+                    )
+                elif child.type == 'image':
+                    _append_inline_style(child, 'display:block;max-width:100%;height:auto;margin:14px auto;')
+
+    return tokens
+
 def markdown_to_zhihu_html(md_text, theme_name='modern-blue'):
     md = build_parser()
     tokens = prepare_tokens_for_zhihu_html(parse_markdown_tokens(md_text, parser=md))
@@ -1904,6 +2115,20 @@ def markdown_to_zhihu_html(md_text, theme_name='modern-blue'):
         '"Microsoft YaHei",Arial,sans-serif;font-size:16px;line-height:1.75;'
     )
     return f'<section style="{html.escape(section_style, quote=True)}">\n{body}</section>'
+
+def markdown_to_rich_editor_html(md_text, platform):
+    """Render distinct inline HTML for editors that parse pasted rich text."""
+    md = build_parser()
+    tokens = prepare_tokens_for_rich_editor_html(parse_markdown_tokens(md_text, parser=md), platform)
+    body = md.renderer.render(tokens, md.options, {})
+    section_style = RICH_EDITOR_HTML_STYLES[platform]['section_style']
+    return f'<section style="{html.escape(section_style, quote=True)}">\n{body}</section>'
+
+def markdown_to_notion_html(md_text):
+    return markdown_to_rich_editor_html(md_text, 'notion')
+
+def markdown_to_feishu_html(md_text):
+    return markdown_to_rich_editor_html(md_text, 'feishu')
 
 def markdown_to_wechat_html(md_text, theme_name='modern-blue'):
     theme = THEMES.get(theme_name, THEMES['modern-blue'])
@@ -2154,8 +2379,10 @@ USAGE = f"""Usage:
   python3 typeset.py input.md output.zhihu.html --platform zhihu-html
   python3 typeset.py input.md output.xhs.txt --platform xhs
   python3 typeset.py input.md output.feishu.md --platform feishu
+  python3 typeset.py input.md output.feishu.html --platform feishu-html
   python3 typeset.py input.md output.wechat.html --platform wechat
   python3 typeset.py input.md output.notion.md --platform notion
+  python3 typeset.py input.md output.notion.html --platform notion-html
 
 Inputs:
   .md/.txt files are read as UTF-8 text.
@@ -2168,7 +2395,7 @@ Themes:
 Note:
   Themes affect HTML/RTF visual styling. Markdown output is portable Markdown.
   Platform output supports Zhihu/Xiaohongshu plain text, Zhihu rich HTML,
-  Feishu/Notion Markdown, and WeChat inline HTML.
+  Feishu/Notion Markdown or rich HTML, and WeChat inline HTML.
 """
 
 def read_input_text(filepath):
@@ -2468,7 +2695,7 @@ def parse_cli_args(argv):
             if idx + 1 < len(args):
                 platform = normalize_platform_name(args[idx+1])
                 if platform is None:
-                    print("Error: --platform must be one of: zhihu, zhihu-html, xhs, feishu, wechat, notion", file=sys.stderr)
+                    print(f"Error: --platform must be one of: {SUPPORTED_PLATFORM_LABEL}", file=sys.stderr)
                     sys.exit(1)
                 args.pop(idx+1)
                 args.pop(idx)
@@ -2522,15 +2749,19 @@ def parse_cli_args(argv):
             platform = 'zhihu'
         elif lower_out.endswith(('.xhs.txt', '.xiaohongshu.txt', '.rednote.txt')):
             platform = 'xhs'
+        elif lower_out.endswith(('.feishu.html', '.lark.html', '.feishu-rich.html', '.lark-rich.html')):
+            platform = 'feishu-html'
         elif lower_out.endswith(('.feishu.txt', '.lark.txt', '.feishu.md', '.lark.md')):
             platform = 'feishu'
         elif lower_out.endswith(('.wechat.html', '.weixin.html', '.wx.html')):
             platform = 'wechat'
+        elif lower_out.endswith(('.notion.html', '.notion-rich.html')):
+            platform = 'notion-html'
         elif lower_out.endswith(('.notion.md', '.notion.txt')):
             platform = 'notion'
 
-    if platform is not None and platform not in ('zhihu', 'zhihu-html', 'xhs', 'feishu', 'wechat', 'notion'):
-        print("Error: --platform must be one of: zhihu, zhihu-html, xhs, feishu, wechat, notion", file=sys.stderr)
+    if platform is not None and platform not in SUPPORTED_PLATFORMS:
+        print(f"Error: --platform must be one of: {SUPPORTED_PLATFORM_LABEL}", file=sys.stderr)
         sys.exit(1)
 
     return filepath, out_path, theme, platform, title

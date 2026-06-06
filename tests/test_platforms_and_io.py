@@ -63,7 +63,8 @@ def test_wechat_output_is_inline_html_without_style_block():
     assert rendered.startswith('<section style=')
     assert '<style>' not in rendered
     assert 'style=' in rendered
-    assert 'callout-summary' in rendered
+    assert '<section class="callout callout-summary"' in rendered
+    assert 'background-color:' in rendered
     assert '<mark style=' in rendered
 
 
@@ -77,6 +78,25 @@ def test_html_callout_text_is_vertically_centered():
     wechat = markdown_to_platform_text(SOURCE, 'wechat', theme_name='warm-peach')
     assert 'display:flex;flex-direction:column;justify-content:center;' in wechat
     assert '<p style="margin:0;line-height:1.8;' in wechat
+
+
+def test_feishu_and_notion_html_are_rich_paste_outputs():
+    notion = markdown_to_platform_text(SOURCE, 'notion-html')
+    feishu = markdown_to_platform_text(SOURCE, 'feishu-html')
+
+    assert notion != feishu
+    assert notion.startswith('<section style=')
+    assert feishu.startswith('<section style=')
+    assert '<h1 style=' in notion
+    assert '<h1 style=' in feishu
+    assert '<strong style=' in notion
+    assert '<strong style=' in feishu
+    assert '**重点 A**' not in notion
+    assert '**重点 A**' not in feishu
+    assert '<blockquote style=' in notion
+    assert '<blockquote style=' in feishu
+    assert '#f7f6f3' in notion
+    assert '#3370ff' in feishu
 
 
 def test_zhihu_html_is_compact_inline_rich_text():
@@ -130,6 +150,11 @@ def test_parse_cli_args_auto_detects_zhihu_html():
     assert theme == 'modern-blue'
     assert platform == 'zhihu-html'
     assert title is None
+
+
+def test_parse_cli_args_auto_detects_feishu_and_notion_html():
+    assert parse_cli_args(['input.md', 'output.feishu.html'])[3] == 'feishu-html'
+    assert parse_cli_args(['input.md', 'output.notion.html'])[3] == 'notion-html'
 
 
 def test_parse_cli_args_allows_stdin_mode():

@@ -136,8 +136,10 @@ python3 typeset.py input.md output.zhihu.txt --platform zhihu
 python3 typeset.py input.md output.zhihu.html --platform zhihu-html
 python3 typeset.py input.md output.xhs.txt --platform xhs
 python3 typeset.py input.md output.feishu.md --platform feishu
+python3 typeset.py input.md output.feishu.html --platform feishu-html
 python3 typeset.py input.md output.wechat.html --platform wechat
 python3 typeset.py input.md output.notion.md --platform notion
+python3 typeset.py input.md output.notion.html --platform notion-html
 ```
 
 输入支持 `.md`、`.txt` 和 `.rtf`。其中 `.rtf` 会优先通过 macOS 自带的 `textutil` 转成纯文本；如果不可用或转换失败，会使用纯 Python 的 `striprtf` 兜底。对于没有 Markdown 标记的纯文本输入，脚本会保守地自动识别第一行标题、短章节标题和明显的内联并列项，生成 `#` / `##` 层级和 bullet 列表。
@@ -151,6 +153,7 @@ python3 typeset.py ~/Desktop/codex.rtf output.zhihu.txt --platform zhihu
 python3 typeset.py ~/Desktop/codex.rtf output.zhihu.html --platform zhihu-html
 python3 typeset.py ~/Desktop/codex.rtf output.xhs.txt --platform xhs
 python3 typeset.py ~/Desktop/codex.rtf output.wechat.html --platform wechat
+python3 typeset.py ~/Desktop/codex.rtf output.notion.html --platform notion-html
 ```
 
 注意：`.md` 输出会转换为通用 Markdown。脚本会把 `[!summary]`、`[!key]` 这类结构化源标记转换成无标签引用块，把 `==...==` 转换成更兼容的加粗文本。
@@ -173,7 +176,7 @@ Markdown 本身不支持主题色、背景色、边框和卡片样式。因此 `
 
 知乎富文本 HTML 输出（`zhihu-html` / `*.zhihu.html`）是给知乎编辑器粘贴用的紧凑内联 HTML。知乎粘贴时经常会清掉颜色、背景和边框样式，所以这一路输出不把配色当成核心效果，而是优先保留标题加粗、列表、表格、引用块和重点加粗。使用时在浏览器中打开渲染后的 HTML，复制页面内容，再粘贴到知乎编辑器。
 
-飞书和 Notion 输出会保留更接近 GFM 的 Markdown，且不会显示“摘要/核心观点”固定标签，适合粘贴后自动转成富文本块。公众号输出是无 `<style>` 标签的内联样式 HTML，适合粘贴进公众号编辑器保留基础配色、callout、表格和代码样式。
+飞书和 Notion 的 `.md` 输出会保留更接近 GFM 的 Markdown，且不会显示“摘要/核心观点”固定标签，适合作为源码备选。但直接把 Markdown 源码粘贴到 Notion 时，Notion 可能不会把 `**粗体**` 自动解析成富文本；需要保留粗体、标题、列表和表格时，优先使用 `feishu-html` / `notion-html`，在浏览器中打开渲染后的 HTML，复制页面内容再粘贴到编辑器。公众号输出是无 `<style>` 标签的内联样式 HTML，callout 使用 `section` 和 `background-color`，比普通 `div + background` 更容易被公众号编辑器保留基础背景色。
 
 知乎输出：
 
@@ -193,6 +196,13 @@ python3 typeset.py codex-for-every-role-source.md codex-for-every-role.zhihu.htm
 python3 typeset.py codex-for-every-role-source.md codex-for-every-role.xhs.txt --platform xhs
 ```
 
+飞书 / Notion 富文本 HTML 输出：
+
+```bash
+python3 typeset.py codex-for-every-role-source.md codex-for-every-role.feishu.html --platform feishu-html
+python3 typeset.py codex-for-every-role-source.md codex-for-every-role.notion.html --platform notion-html
+```
+
 也可以省略 `--platform`，通过文件名自动识别：
 
 ```bash
@@ -201,6 +211,8 @@ python3 typeset.py input.md output.zhihu.html
 python3 typeset.py input.md output.xhs.txt
 python3 typeset.py input.md output.wechat.html
 python3 typeset.py input.md output.notion.md
+python3 typeset.py input.md output.notion.html
+python3 typeset.py input.md output.feishu.html
 ```
 
 ## 支持主题
