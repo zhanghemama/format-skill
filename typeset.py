@@ -1115,11 +1115,13 @@ def text_inline_to_platform(text):
     text = text.replace('\\*', '*').replace('\\_', '_')
     return text.strip()
 
-def render_platform_heading(level, text, platform, counters):
+def render_platform_heading(level, text, platform, counters, no_document_title=False):
     text = text_inline_to_platform(text)
     if level == 1:
         counters['h2'] = 0
         counters['h3'] = 0
+        if no_document_title:
+            return text
         return f'《{text}》'
     if level == 2:
         counters['h2'] += 1
@@ -1280,7 +1282,7 @@ def _render_blockquote_platform(tokens, start_index, platform, counters, indent=
         return [f'「{inner_text}」'], end_index
     return [], end_index
 
-def _render_blocks_platform(tokens, platform, counters, indent=0):
+def _render_blocks_platform(tokens, platform, counters, indent=0, no_document_title=False):
     lines = []
     index = 0
 
@@ -1291,7 +1293,15 @@ def _render_blocks_platform(tokens, platform, counters, indent=0):
             inline_index = _first_inline_index(tokens, index, _container_end(tokens, index))
             text = inline_tokens_to_platform_text(tokens[inline_index].children, platform) if inline_index is not None else ''
             level = int(token.tag[1]) if token.tag.startswith('h') else 1
-            _append_block(lines, [' ' * indent + render_platform_heading(level, text, platform, counters)])
+            _append_block(lines, [
+                ' ' * indent + render_platform_heading(
+                    level,
+                    text,
+                    platform,
+                    counters,
+                    no_document_title=no_document_title,
+                )
+            ])
             index = _container_end(tokens, index) + 1
             continue
 
@@ -1344,11 +1354,20 @@ def _compact_platform_lines(lines):
         compacted.append(line.rstrip())
     return compacted
 
-def render_plain_platform_text(tokens, platform):
+def render_plain_platform_text(tokens, platform, no_document_title=False):
     counters = {'h2': 0, 'h3': 0}
-    return '\n'.join(_compact_platform_lines(_render_blocks_platform(tokens, platform, counters)))
+    return '\n'.join(
+        _compact_platform_lines(
+            _render_blocks_platform(
+                tokens,
+                platform,
+                counters,
+                no_document_title=no_document_title,
+            )
+        )
+    )
 
-def markdown_to_platform_text(md_text, platform, theme_name='modern-blue'):
+def markdown_to_platform_text(md_text, platform, theme_name='modern-blue', no_document_title=False):
     """
     Render Markdown-like source into platform-oriented text or inline HTML.
 
@@ -1370,7 +1389,11 @@ def markdown_to_platform_text(md_text, platform, theme_name='modern-blue'):
     if platform == 'wechat':
         return markdown_to_wechat_html(md_text, theme_name=theme_name)
 
-    return render_plain_platform_text(parse_markdown_tokens(md_text), platform)
+    return render_plain_platform_text(
+        parse_markdown_tokens(md_text),
+        platform,
+        no_document_title=no_document_title,
+    )
 
 def markdown_to_rtf(md_text, theme_name='modern-blue'):
     """
@@ -2378,6 +2401,7 @@ USAGE = f"""Usage:
   python3 typeset.py input.md output.zhihu.txt --platform zhihu
   python3 typeset.py input.md output.zhihu.html --platform zhihu-html
   python3 typeset.py input.md output.xhs.txt --platform xhs
+  python3 typeset.py input.md output.xhs.txt --platform xhs --no-document-title
   python3 typeset.py input.md output.feishu.md --platform feishu
   python3 typeset.py input.md output.feishu.html --platform feishu-html
   python3 typeset.py input.md output.wechat.html --platform wechat
@@ -2396,6 +2420,8 @@ Note:
   Themes affect HTML/RTF visual styling. Markdown output is portable Markdown.
   Platform output supports Zhihu/Xiaohongshu plain text, Zhihu rich HTML,
   Feishu/Notion Markdown or rich HTML, and WeChat inline HTML.
+  Use --no-document-title when the first H1 is a section heading rather than
+  the article title for plain-text platform output.
 """
 
 def read_input_text(filepath):
@@ -2669,6 +2695,7 @@ def parse_cli_args(argv):
     theme = 'modern-blue'
     platform = None
     title = None
+    no_document_title = False
     args = list(argv)
 
     if args and args[0] in ('-h', '--help'):
@@ -2718,6 +2745,10 @@ def parse_cli_args(argv):
         except ValueError:
             pass
 
+    if '--no-document-title' in args:
+        args.remove('--no-document-title')
+        no_document_title = True
+
     # Friendly shorthand: python3 typeset.py input output modern-blue
     if len(args) >= 3 and args[2] in THEMES:
         theme = args[2]
@@ -2764,10 +2795,10 @@ def parse_cli_args(argv):
         print(f"Error: --platform must be one of: {SUPPORTED_PLATFORM_LABEL}", file=sys.stderr)
         sys.exit(1)
 
-    return filepath, out_path, theme, platform, title
+    return filepath, out_path, theme, platform, title, no_document_title
 
 def main():
-    filepath, out_path, theme, platform, title = parse_cli_args(sys.argv[1:])
+    filepath, out_path, theme, platform, title, no_document_title = parse_cli_args(sys.argv[1:])
 
     if filepath:
         try:
@@ -2775,7 +2806,12 @@ def main():
 
             if out_path:
                 if platform:
-                    platform_text_out = markdown_to_platform_text(markdown_out, platform, theme_name=theme)
+                    platform_text_out = markdown_to_platform_text(
+                        markdown_out,
+                        platform,
+                        theme_name=theme,
+                        no_document_title=no_document_title,
+                    )
                     with open(out_path, 'w', encoding='utf-8') as f:
                         f.write(platform_text_out)
                     print(f"Successfully saved {platform} platform output to {out_path}")
@@ -2801,7 +2837,14 @@ def main():
                     print(f"Successfully typeset and saved normalized text to {out_path}")
             else:
                 if platform:
-                    print(markdown_to_platform_text(markdown_out, platform, theme_name=theme))
+                    print(
+                        markdown_to_platform_text(
+                            markdown_out,
+                            platform,
+                            theme_name=theme,
+                            no_document_title=no_document_title,
+                        )
+                    )
                 else:
                     # Print Markdown to stdout
                     print(markdown_to_portable_markdown(markdown_out))
@@ -2813,7 +2856,15 @@ def main():
         content = sys.stdin.read()
         markdown_out = prepare_markdown_input(content)
         if platform:
-            print(markdown_to_platform_text(markdown_out, platform, theme_name=theme), end='')
+            print(
+                markdown_to_platform_text(
+                    markdown_out,
+                    platform,
+                    theme_name=theme,
+                    no_document_title=no_document_title,
+                ),
+                end='',
+            )
         else:
             print(markdown_to_portable_markdown(markdown_out), end='')
 

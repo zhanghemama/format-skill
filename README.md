@@ -135,6 +135,7 @@ python3 typeset.py input.md output.md modern-blue
 python3 typeset.py input.md output.zhihu.txt --platform zhihu
 python3 typeset.py input.md output.zhihu.html --platform zhihu-html
 python3 typeset.py input.md output.xhs.txt --platform xhs
+python3 typeset.py input.md output.xhs.txt --platform xhs --no-document-title
 python3 typeset.py input.md output.feishu.md --platform feishu
 python3 typeset.py input.md output.feishu.html --platform feishu-html
 python3 typeset.py input.md output.wechat.html --platform wechat
@@ -194,6 +195,8 @@ python3 typeset.py codex-for-every-role-source.md codex-for-every-role.zhihu.htm
 
 ```bash
 python3 typeset.py codex-for-every-role-source.md codex-for-every-role.xhs.txt --platform xhs
+# 如果第一行 H1 不是整篇题目，而是正文里的一级标题：
+python3 typeset.py codex-for-every-role-source.md codex-for-every-role.xhs.txt --platform xhs --no-document-title
 ```
 
 飞书 / Notion 富文本 HTML 输出：
