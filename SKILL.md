@@ -24,6 +24,9 @@ Before writing any structured Markdown or rendering, read the source and output 
 ### 隐式 bullet → 显式列表
 - 段落 "<前 15 字…>" 后的 N 行平铺并列 → 转 bullet
   保留衔接词：首先 / 其次 / 再次 / 另外 / 此外（不删除）
+- 时间线 / 阶段演进 / "标题：说明" 结构 → [label-body / bullet / table]
+  渲染策略：标题单独一行，说明保留一个完整段落 / 单层 bullet / 表格
+  是否拆分说明句：是 / 否（默认否，除非原文已经分行或用户要求）
 
 ### 表格转换
 - 原文 "<前 15 字…>" 中的对比结构（A 是 X，B 是 Y，C 是 Z 形式）→ 转 Markdown 表格
@@ -35,6 +38,16 @@ Before writing any structured Markdown or rendering, read the source and output 
 
 ### 不动的段落
 - 大段叙述、推理、过渡段一律保持普通 <p>，不加任何背景色或 callout
+
+### 文档标题判断
+- 第一行 "<前 15 字…>" → 文章题目 / 正文一级标题
+- 若第一行不是文章题目，平台输出使用 `--no-document-title` 或等价处理，避免强制输出《标题》
+
+### 平台列表策略
+- 小红书：一级编号，label-body 说明行使用全角缩进，不使用 `-` / `◦` / `•`
+- 知乎：一级 bullet，label-body 说明行使用全角缩进，不使用第二层 bullet
+- 普通 Markdown：若是 label-body 结构，使用 "- 标题" + 下一行缩进说明，不使用嵌套 bullet
+- 公众号 / HTML：可保留语义列表，但避免为自然段强行拆出多条子 bullet
 ```
 
 Then **stop and wait for user confirmation or adjustment.** Do not generate the final Markdown or run the typeset script until the user approves.
@@ -45,6 +58,7 @@ After the user confirms the decision list:
 1. Apply only the approved structural changes to the original text.
 2. Produce the structured Markdown.
 3. Pass it through `typeset.py` with the requested theme to produce `.md`, `.html`, or `.rtf`.
+4. Run the platform QA checklist before delivery.
 
 ---
 
@@ -82,6 +96,52 @@ After the user confirms the decision list:
   - C
   ```
 
+### Label-body 结构（标题行 + 说明段）
+
+当原文呈现「短标签 / 时间段 / 阶段名 + 一段说明」时，优先使用 **label-body**，而不是嵌套 bullet 或表格。
+
+适用信号：
+- 时间线：`2023-2025 年：聊天机器人` 后面跟一段解释。
+- 阶段 / 跨越：`跨越一：生产力大爆发` 后面跟一段解释。
+- 判断项：`审查成为瓶颈` 后面跟一段解释。
+
+默认输出形态：
+```text
+• 2023-2025 年：聊天机器人
+　　利用早期聊天机器人协助部分流程，例如生成简短的代码片段。从最初的人类手动复制并粘贴到文本编辑器中，到后期逐步演变为补全和可以写一些代码。
+```
+
+约束：
+- **标题和说明可以分行，但说明段不要再拆成多条 bullet。**
+- 如果原文说明是一个自然段，渲染后仍保持一个自然段。
+- 不要为了视觉层级把原文连续句子拆成多行。
+- 只有当原文已经逐行列出，或用户明确要求细分时，才使用嵌套 bullet。
+- 不要把 label-body 强行转成表格，除非用户明确要求或确实存在 N 个对象 × M 个属性的稳定对比。
+
+平台渲染建议：
+```text
+小红书：
+1. 2023-2025 年：聊天机器人
+　　说明段保持一段，不加 bullet
+
+知乎：
+• 2023-2025 年：聊天机器人
+　　说明段保持一段，不加 bullet
+
+普通 Markdown：
+- 2023-2025 年：聊天机器人
+  说明段保持一段，不加嵌套 bullet
+```
+
+反例：
+```text
+• 2023-2025 年：聊天机器人
+  • 利用早期聊天机器人协助部分流程...
+  • 从最初的人类手动复制...
+```
+
+反例原因：知乎 / 小红书编辑器会把二级列表渲成额外圆点；用户看到的是双重 bullet，信息层级反而变乱。
+
 ### 表格转换
 
 当原文呈现「N 个对象 × M 个相同属性」的对比结构时，转表格：
@@ -94,6 +154,30 @@ After the user confirms the decision list:
   | A    | 内容 1 | …    |
   | B    | 内容 2 | …    |
   ```
+
+### 文档标题判断
+
+平台输出通常会把 H1 当作文章题目：
+- 小红书 / 知乎纯文本：`# 标题` → `《标题》`
+- HTML / Markdown：`# 标题` 保留为一级标题
+
+因此在 Phase 1 必须判断第一行身份：
+- 若第一行是整篇文章题目：保留为 H1。
+- 若第一行只是正文中的一级标题：不要强行输出《标题》，应使用 `--no-document-title` 或把它降级为章节标题。
+
+示例：
+```text
+AI 记忆系统全面升级：Dreaming V3 和 Chronicle 来了
+
+🛠 核心升级
+```
+第一行是文章题目，`🛠 核心升级` 是正文标题。
+
+```text
+🛠 核心升级
+这次的记忆能力飞跃...
+```
+第一行更可能是正文一级标题；若用户没有提供文章题目，平台输出不要自动包成《🛠 核心升级》。
 
 ### Inline 高亮
 
@@ -136,6 +220,59 @@ After the user confirms the decision list:
 ### 4. 段落与换行
 - 段落之间空一行。
 - 合并 PDF 复制造成的句中断行。
+- 不要把原文一个自然段拆成多条 bullet 或多行说明，除非原文已分行或用户明确要求。
+- label-body 的标题和说明可以分为两行；说明本身保持一个自然段。
+
+---
+
+## Platform Rendering Rules
+
+### 小红书 (`xhs`)
+
+- 文章题目可用 `《标题》`。
+- 章节标题使用 `01｜标题`。
+- 一级列表使用 `1. 2. 3.`。
+- label-body 说明行使用全角缩进 `　　`，不要使用 `-`、`•`、`◦`。
+- 避免嵌套列表；小红书编辑器可能自动生成圆点，手写符号会出现双重 bullet。
+
+### 知乎 (`zhihu`)
+
+- 文章题目可用 `《标题》`。
+- 章节标题使用 `一、标题`。
+- 一级列表使用 `•`。
+- label-body 说明行使用全角缩进 `　　`，不要使用第二层 `•`。
+- 避免颜色 / 背景作为核心信息，知乎编辑器可能清理样式。
+
+### 普通 Markdown
+
+- 标准段落、标题、引用和加粗保持 Markdown 语义。
+- 对 label-body，不要使用嵌套 bullet；使用：
+  ```md
+  - 标题
+    说明段保持一段
+  ```
+- 如果需要真正的多级列表，必须是原文已有并列层级，或用户明确要求。
+
+### 公众号 (`wechat`)
+
+- 使用内联 HTML 输出。
+- 可以保留视觉 callout 和列表，但不要把自然段强行拆成多个子 bullet。
+- 若从浏览器复制渲染内容到公众号编辑器，优先检查列表缩进、标题层级和 callout 背景是否被保留。
+
+---
+
+## Platform QA Checklist
+
+交付前必须抽查最终输出，而不是只看源 Markdown：
+
+- 是否出现重复编号：`01｜1️⃣`、`一、1.`、`01｜一、`。
+- 第一行是否被错误包成《标题》；若不是文章题目，是否已使用 `--no-document-title` 或等价处理。
+- 是否出现双重 bullet：`•` 下又有 `•`，或编辑器会显示圆点 + `-` / `◦`。
+- label-body 说明是否保持一个自然段，没有被拆成多条 bullet。
+- 二级标题和说明是否粘连在同一行；若用户需要标题 / 内容分开，应为标题一行、说明一行。
+- 是否把适合 label-body 的阶段说明误转成表格，导致信息过密。
+- 是否有平台特化符号污染其它版本，例如把小红书缩进符号带进普通 Markdown。
+- 是否保留了原文实词，未改写、删减、扩写内容。
 
 ---
 
@@ -158,6 +295,7 @@ python3 /path/to/format-skill/typeset.py input.md output.rtf --theme dark-cyber
 python3 /path/to/format-skill/typeset.py input.md output.zhihu.txt --platform zhihu
 python3 /path/to/format-skill/typeset.py input.md output.zhihu.html --platform zhihu-html
 python3 /path/to/format-skill/typeset.py input.md output.xhs.txt --platform xhs
+python3 /path/to/format-skill/typeset.py input.md output.xhs.txt --platform xhs --no-document-title
 python3 /path/to/format-skill/typeset.py input.md output.feishu.md --platform feishu
 python3 /path/to/format-skill/typeset.py input.md output.feishu.html --platform feishu-html
 python3 /path/to/format-skill/typeset.py input.md output.wechat.html --platform wechat
